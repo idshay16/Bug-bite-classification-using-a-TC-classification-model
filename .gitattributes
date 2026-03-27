@@ -1,2 +1,0 @@
-# Strip notebook outputs on commit when nbstripout is installed.
-*.ipynb filter=nbstripout
