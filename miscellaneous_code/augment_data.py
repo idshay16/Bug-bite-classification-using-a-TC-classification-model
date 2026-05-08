@@ -13,6 +13,7 @@ import sys
 import random
 import argparse
 import math
+import shutil
 from pathlib import Path
 
 # Ensure UTF-8 output on Windows terminals
@@ -31,6 +32,14 @@ from collections import defaultdict
 # ──────────────────────────────────────────────────────────────────────────────
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+
+
+def _longpath(p: Path) -> str:
+    """Prepend the Windows extended-length prefix to bypass MAX_PATH (260 chars)."""
+    if sys.platform != "win32":
+        return str(p)
+    resolved = str(p.resolve())
+    return resolved if resolved.startswith("\\\\") else "\\\\?\\" + resolved
 
 
 def find_splits(data_dir: Path) -> dict[str, Path]:
@@ -267,16 +276,15 @@ def balance_dataset(
     max_count   = target_count or max(counts.values())
     total_new   = sum(max(0, max_count - n) for n in counts.values())
 
-    # Destination root
-    if output_dir is None:
-        dest_root = data_dir / f"{split}_augmented"
-    else:
-        dest_root = output_dir
+    in_place = output_dir is None
 
     print("\n-- Balancing Plan ------------------------------------------")
     print(f"  Target count per class : {max_count}")
     print(f"  Total new images       : {total_new}")
-    print(f"  Output directory       : {dest_root}")
+    if in_place:
+        print(f"  Output                 : in-place (same class folders)")
+    else:
+        print(f"  Output directory       : {output_dir}")
     print()
 
     for cls_name, imgs in sorted(classes.items()):
@@ -296,42 +304,111 @@ def balance_dataset(
         print("Aborted.")
         return
 
-    dest_root.mkdir(parents=True, exist_ok=True)
+    if not in_place:
+        output_dir.mkdir(parents=True, exist_ok=True)
+
     total_written = 0
 
     for cls_name, src_imgs in sorted(classes.items()):
-        need     = max(0, max_count - len(src_imgs))
-        cls_dest = dest_root / cls_name
-        cls_dest.mkdir(parents=True, exist_ok=True)
+        need = max(0, max_count - len(src_imgs))
 
-        # Copy originals
-        for src in src_imgs:
-            dst = cls_dest / src.name
-            if not dst.exists():
-                Image.open(src).save(dst)
+        if in_place:
+            cls_dest = split_path / cls_name
+        else:
+            cls_dest = output_dir / cls_name
+            cls_dest.mkdir(parents=True, exist_ok=True)
+            for src in src_imgs:
+                dst = cls_dest / src.name
+                if not dst.exists():
+                    shutil.copy2(_longpath(src), _longpath(dst))
 
         if need == 0:
             print(f"  {cls_name:<20s}  [ok] no augmentation needed")
             continue
 
+        # Only augment originals, never re-augment already-augmented files
+        pool = [p for p in src_imgs if not p.name.startswith("augmented_")]
+        if not pool:
+            print(f"  {cls_name:<20s}  [skip] no original images found")
+            continue
+
+        # Start counter after any existing augmented files to avoid name collisions on re-runs
+        aug_counter = len(src_imgs) - len(pool)
+
         written = 0
-        pool    = list(src_imgs)
-        idx     = 0
+        src_idx = 0
         while written < need:
-            src_path = pool[idx % len(pool)]
-            idx += 1
+            src_path = pool[src_idx % len(pool)]
+            src_idx += 1
+            out_name = f"augmented_{aug_counter:04d}_{src_path.name}"
+            aug_counter += 1
             img = Image.open(src_path).convert("RGB")
             aug, _ = augment_image(img)
-            stem    = src_path.stem
-            out_name = f"{stem}_aug{written:04d}{src_path.suffix}"
-            aug.save(cls_dest / out_name)
+            aug.save(_longpath(cls_dest / out_name))
             written += 1
 
         total_written += written
         print(f"  {cls_name:<20s}  [ok] wrote {written} augmented images")
 
     print(f"\nDone. Total new images written: {total_written}")
-    print(f"Output: {dest_root}")
+    if in_place:
+        print(f"Output: in-place within {split_path}")
+    else:
+        print(f"Output: {output_dir}")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Option 4 – Remove augmented data
+# ──────────────────────────────────────────────────────────────────────────────
+
+def remove_augmented_data(
+    data_dir: Path,
+    output_dir: Path | None = None,
+    split: str = "train",
+    dry_run: bool = False,
+) -> None:
+    if output_dir is not None:
+        # Dedicated output dir was used — offer to delete the whole directory
+        if not output_dir.exists():
+            print(f"\nNothing to remove — directory not found: {output_dir}")
+            return
+        aug_files = [p for p in output_dir.rglob("*") if p.is_file()]
+        print("\n-- Cleanup Plan --------------------------------------------")
+        print(f"  Directory : {output_dir}")
+        print(f"  Files     : {len(aug_files)}")
+        if dry_run:
+            print("\n[dry-run] No files removed.")
+            return
+        confirm = input(f"\nDelete entire directory '{output_dir}'? [y/N] ").strip().lower()
+        if confirm != "y":
+            print("Aborted.")
+            return
+        shutil.rmtree(output_dir)
+        print(f"\nDone. Removed directory: {output_dir}")
+    else:
+        # In-place mode — find augmented_* files within the split's class folders
+        splits = find_splits(data_dir)
+        if split not in splits:
+            available = list(splits.keys())
+            split = available[0]
+        split_path = splits[split]
+        aug_files = [p for p in split_path.rglob("augmented_*") if p.is_file()]
+        print("\n-- Cleanup Plan --------------------------------------------")
+        print(f"  Split directory: {split_path}")
+        print(f"  Augmented files: {len(aug_files)}")
+        if dry_run:
+            print("\n[dry-run] No files removed.")
+            return
+        if not aug_files:
+            print("\nNo augmented files found.")
+            return
+        confirm = input(f"\nRemove {len(aug_files)} augmented files? [y/N] ").strip().lower()
+        if confirm != "y":
+            print("Aborted.")
+            return
+        for f in aug_files:
+            f.unlink()
+        print(f"\nDone. Removed {len(aug_files)} augmented files.")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -345,6 +422,7 @@ MENU = """
 |  1)  Show class distribution                     |
 |  2)  Preview augmented samples                   |
 |  3)  Augment data to balance the dataset         |
+|  4)  Remove augmented data                       |
 |  q)  Quit                                        |
 +--------------------------------------------------+
 """
@@ -362,7 +440,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--option", "-o",
-        choices=["1", "2", "3"],
+        choices=["1", "2", "3", "4"],
         default=None,
         help="Run a specific option directly (1, 2, or 3).",
     )
@@ -420,22 +498,29 @@ def main() -> None:
     output_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else None
 
     def run_option(choice: str) -> bool:
-        if choice == "1":
-            show_distribution(data_dir)
-            return True
-        elif choice == "2":
-            show_augmentation_samples(data_dir, n_augmented=args.n_augmented)
-            return True
-        elif choice == "3":
-            balance_dataset(
-                data_dir,
-                output_dir=output_dir,
-                split=args.split,
-                target_count=args.target_count,
-                dry_run=args.dry_run,
-            )
-            return True
-        return False
+        match choice:
+            case "1":
+                show_distribution(data_dir)
+            case "2":
+                show_augmentation_samples(data_dir, n_augmented=args.n_augmented)
+            case "3":
+                balance_dataset(
+                    data_dir,
+                    output_dir=output_dir,
+                    split=args.split,
+                    target_count=args.target_count,
+                    dry_run=args.dry_run,
+                )
+            case "4":
+                remove_augmented_data(
+                    data_dir,
+                    output_dir=output_dir,
+                    split=args.split,
+                    dry_run=args.dry_run,
+                )
+            case _:
+                return False
+        return True
 
     # Direct option via CLI flag
     if args.option:
