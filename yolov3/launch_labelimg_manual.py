@@ -1,65 +1,71 @@
-"""Launch LabelImg for manual YOLO annotation/fixes.
-
-This helper starts LabelImg with your dataset folder, classes file, and
-save directory so you can quickly fix auto-generated labels.
+"""Launch labelme for manual annotation and convert output to YOLO .txt format.
 
 Usage example:
     python yolov3/launch_labelimg_manual.py \
-        --images-dir Yolo_Bug_Data/bites \
-        --classes-file Yolo_Bug_Data/classes.txt \
-        --save-dir Yolo_Bug_Data/bites
+        --images-dir Yolo_Bug_Data/suspicious_review \
+        --classes-file Yolo_Bug_Data/suspicious_review/classes.txt \
+        --save-dir Yolo_Bug_Data/suspicious_review
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import shutil
 import subprocess
-import sys
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Launch LabelImg for manual YOLO annotation updates."
-    )
-    parser.add_argument(
-        "--images-dir",
-        required=True,
-        help="Directory containing images to annotate.",
-    )
-    parser.add_argument(
-        "--classes-file",
-        default="",
-        help="Path to class names file (one class per line).",
-    )
-    parser.add_argument(
-        "--save-dir",
-        default="",
-        help="Directory where YOLO .txt labels should be saved.",
-    )
-    parser.add_argument(
-        "--default-class-name",
-        default="bite",
-        help="Class name to write when auto-creating a classes file.",
-    )
+    parser = argparse.ArgumentParser(description="Launch labelme and convert to YOLO .txt.")
+    parser.add_argument("--images-dir", required=True)
+    parser.add_argument("--classes-file", default="")
+    parser.add_argument("--save-dir", default="")
     return parser.parse_args()
 
 
-def ensure_classes_file(path: str, default_class_name: str) -> str:
-    if path:
-        classes_path = os.path.abspath(path)
-        if not os.path.exists(classes_path):
-            os.makedirs(os.path.dirname(classes_path), exist_ok=True)
-            with open(classes_path, "w", encoding="utf-8") as f:
-                f.write(default_class_name.strip() + "\n")
-        return classes_path
+def read_labels(classes_file: str) -> list[str]:
+    with open(classes_file, encoding="utf-8") as f:
+        return [l.strip() for l in f if l.strip()]
 
-    classes_path = os.path.abspath("Yolo_Bug_Data/classes.txt")
-    os.makedirs(os.path.dirname(classes_path), exist_ok=True)
-    if not os.path.exists(classes_path):
-        with open(classes_path, "w", encoding="utf-8") as f:
-            f.write(default_class_name.strip() + "\n")
-    return classes_path
+
+def convert_json_to_yolo(json_path: str, class_names: list[str]) -> None:
+    with open(json_path, encoding="utf-8") as f:
+        data = json.load(f)
+
+    img_w = data["imageWidth"]
+    img_h = data["imageHeight"]
+    lines: list[str] = []
+
+    for shape in data.get("shapes", []):
+        if shape.get("shape_type") != "rectangle":
+            continue
+        label = shape["label"]
+        if label not in class_names:
+            continue
+        class_id = class_names.index(label)
+
+        (x1, y1), (x2, y2) = shape["points"]
+        cx = (x1 + x2) / 2 / img_w
+        cy = (y1 + y2) / 2 / img_h
+        w = abs(x2 - x1) / img_w
+        h = abs(y2 - y1) / img_h
+        lines.append(f"{class_id} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
+
+    txt_path = os.path.splitext(json_path)[0] + ".txt"
+    with open(txt_path, "w", encoding="utf-8") as f:
+        if lines:
+            f.write("\n".join(lines) + "\n")
+
+
+def convert_all(save_dir: str, class_names: list[str]) -> int:
+    count = 0
+    for fname in os.listdir(save_dir):
+        if not fname.lower().endswith(".json"):
+            continue
+        convert_json_to_yolo(os.path.join(save_dir, fname), class_names)
+        count += 1
+    return count
 
 
 def main() -> None:
@@ -67,27 +73,29 @@ def main() -> None:
 
     images_dir = os.path.abspath(args.images_dir)
     save_dir = os.path.abspath(args.save_dir) if args.save_dir else images_dir
-    classes_file = ensure_classes_file(args.classes_file, args.default_class_name)
 
     if not os.path.isdir(images_dir):
         raise FileNotFoundError(f"Images directory not found: {images_dir}")
     os.makedirs(save_dir, exist_ok=True)
 
-    command = [
-        sys.executable,
-        "-m",
-        "labelImg",
-        images_dir,
-        classes_file,
-        save_dir,
-    ]
+    class_names: list[str] = ["bite"]
+    if args.classes_file:
+        classes_file = os.path.abspath(args.classes_file)
+        if os.path.exists(classes_file):
+            class_names = read_labels(classes_file)
 
-    try:
-        subprocess.run(command, check=True)
-    except FileNotFoundError as exc:
-        raise RuntimeError(
-            "LabelImg is not installed. Install with: python -m pip install labelImg"
-        ) from exc
+    labelme_exe = shutil.which("labelme")
+    if labelme_exe is None:
+        raise RuntimeError("labelme is not installed. Install with: pip install labelme")
+
+    command = [labelme_exe, images_dir, "--output", save_dir, "--autosave"]
+    for label in class_names:
+        command += ["--labels", label]
+
+    subprocess.run(command, check=True)
+
+    count = convert_all(save_dir, class_names)
+    print(f"Converted {count} JSON annotation(s) to YOLO .txt format.")
 
 
 if __name__ == "__main__":

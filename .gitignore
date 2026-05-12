@@ -4,3 +4,4 @@ Yolo_Bug_Data
 Bug-Data
 .vscode
 model_weights
+yolov3/__pycache__

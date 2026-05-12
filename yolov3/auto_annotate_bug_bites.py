@@ -68,7 +68,7 @@ def parse_args() -> argparse.Namespace:
         "--max-boxes",
         type=int,
         default=5,
-        help="Maximum number of boxes to keep per image.",
+        help="Maximum number of boxes to keep per image. Use 0 for no limit.",
     )
     parser.add_argument(
         "--overwrite",
@@ -166,7 +166,8 @@ def find_boxes(
         candidates.append((score, x, y, bw, bh))
 
     candidates.sort(key=lambda x: x[0], reverse=True)
-    selected = [(x, y, bw, bh) for _, x, y, bw, bh in candidates[:max_boxes]]
+    limit = max_boxes if max_boxes > 0 else len(candidates)
+    selected = [(x, y, bw, bh) for _, x, y, bw, bh in candidates[:limit]]
     return selected
 
 
