@@ -1,7 +1,17 @@
+# Misc. directories and files
+.claude
+.vscode
+
+# Data
 Cyclone-Data
 Yolo_Bug_Data
-.claude
 Bug-Data
-.vscode
+
+# Model Weights (not uploaded due to repo storage limits)
 model_weights
+
+# YOLO Model base weights and util scripts cache
 yolov3/__pycache__
+yolo_runs
+yolo26n.pt
+yolo26x.pt
