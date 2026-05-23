@@ -18,3 +18,6 @@ yolo26x.pt
 
 # Misc Validation runs logging
 Validation_results
+
+# Python cache files
+miscellaneous_code\__pycache__
