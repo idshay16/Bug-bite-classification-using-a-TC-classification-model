@@ -1,11 +1,14 @@
-"""Grid-line QA script — runs autonomously, outputs /tmp/grid_qa.png.
+"""Grid-line QA script — focused single-image debug mode.
 
-Usage:  python miscellaneous_code/grid_qa.py
+Usage:  python miscellaneous_code/grid_qa.py [path/to/image.jpg]
+Default target: DD(30-35)/20030517.00-30.jpg
+
+Output: tmp/grid_qa.png  —  4 panels:
+  Raw | Row profile (raw vs clean overlaid) | Mask | Cleaned
 """
 
 import os
 import sys
-import random
 import cv2
 import numpy as np
 import matplotlib
@@ -17,166 +20,122 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, SCRIPT_DIR)
 
 from cyclone_preprocessing import (build_grid_masks, apply_grid_mask,
-                                   _flag_ranges, _make_grid_mask,
-                                   _exclude_overlapping, _grid_position_seams)
+                                   _make_grid_mask, _highpass,
+                                   _grid_position_seams)
 
-SRC_DIR   = os.path.join(PROJECT_ROOT, 'Cyclone-Data',
-                         'data_categorised_rgb', 'data_categorised_rgb')
-OUT_DIR   = os.path.join(PROJECT_ROOT, 'tmp')
-OUT_PNG   = os.path.join(OUT_DIR, 'grid_qa.png')
+SRC_DIR  = os.path.join(PROJECT_ROOT, 'Cyclone-Data',
+                        'data_categorised_rgb', 'data_categorised_rgb')
+OUT_DIR  = os.path.join(PROJECT_ROOT, 'tmp')
+OUT_PNG  = os.path.join(OUT_DIR, 'grid_qa.png')
 
-N_SAMPLES      = 20   # total images to process
-SHOW_N         = 10   # rows in the PNG
-RESIDUAL_SIGMA = 1.2  # match per-image fallback so QA accurately reports what survives
-RESIDUAL_MAX_W = 8    # match per-image fallback width
+DEFAULT_IMG = os.path.join(SRC_DIR, 'DD(30-35)', '20030517.00-30.jpg')
 
-
-# ── helpers ───────────────────────────────────────────────────────────────────
-
-def residual_check(clean_bgr, canonical_rows, canonical_cols):
-    """Run position-constrained residual seam detector on a cleaned image.
-
-    Only checks positions corresponding to valid grid spacings (divisors 3/4
-    of each image dimension).  Geographic coastlines — which appear at
-    arbitrary positions — are therefore excluded from the residual count.
-
-    Canonical rows/cols already handled are excluded so we only count
-    lines that the cleaning step MISSED.
-    """
-    gray = cv2.cvtColor(clean_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
-    h, w = gray.shape
-    rows = _grid_position_seams(gray.mean(axis=1), h,
-                                canonical_rows, RESIDUAL_SIGMA, RESIDUAL_MAX_W)
-    raw_cols = _flag_ranges(gray.mean(axis=0), w, RESIDUAL_SIGMA, RESIDUAL_MAX_W)
-    cols = _exclude_overlapping(raw_cols, canonical_cols)
-    ann  = clean_bgr.copy()
-    for s, e in rows:
-        ann[s:e, :] = (0, 0, 255)
-    for s, e in cols:
-        ann[:, s:e] = (0, 0, 255)
-    return ann, len(rows) + len(cols)
-
-
-def lap_ratio_unmasked(raw_bgr, clean_bgr, mask_2d):
-    """Laplacian variance ratio computed only on unmasked (untouched) pixels.
-
-    A ratio near 1.0 means cloud structure sharpness is preserved.
-    Computing over the full image would penalise legitimate seam removal.
-    """
-    gray_r = cv2.cvtColor(raw_bgr,   cv2.COLOR_BGR2GRAY).astype(np.float32)
-    gray_c = cv2.cvtColor(clean_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
-    lap_r  = cv2.Laplacian(gray_r, cv2.CV_32F)
-    lap_c  = cv2.Laplacian(gray_c, cv2.CV_32F)
-    unmasked = (mask_2d == 0)
-    if unmasked.sum() < 100:
-        return 1.0
-    var_r = float(lap_r[unmasked].var())
-    var_c = float(lap_c[unmasked].var())
-    return var_c / var_r if var_r > 0 else 1.0
-
-
-# ── main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    random.seed(42)
+    img_path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_IMG
+    print(f'Target: {img_path}')
 
-    # Collect all paths, stratified sample
-    by_cls = {}
-    for cls in sorted(os.listdir(SRC_DIR)):
-        cls_path = os.path.join(SRC_DIR, cls)
-        if not os.path.isdir(cls_path):
-            continue
-        by_cls[cls] = [
-            os.path.join(cls_path, f)
-            for f in os.listdir(cls_path)
-            if f.lower().endswith(('.jpg', '.jpeg', '.png'))
-        ]
-    print(f'Classes: {list(by_cls.keys())}')
-    per_class = max(1, N_SAMPLES // len(by_cls))
-    sampled   = []
-    for cls, paths in by_cls.items():
-        sampled.extend(random.sample(paths, min(per_class, len(paths))))
-    random.shuffle(sampled)
-    sampled = sampled[:N_SAMPLES]
-    print(f'Processing {len(sampled)} images...\n')
-
-    # Build masks once
     masks, _, _ = build_grid_masks(SRC_DIR)
-    print()
 
-    # Process each image
-    results = []
-    h_key, w_key = max(masks.keys(), key=lambda k: k[0] * k[1])  # dominant size
-    dom_mask = masks[(h_key, w_key)]
+    raw   = cv2.imread(img_path)
+    if raw is None:
+        print(f'ERROR: cannot read {img_path}')
+        sys.exit(1)
 
-    for p in sampled:
-        cls = os.path.basename(os.path.dirname(p))
-        raw = cv2.imread(p)
-        if raw is None:
-            continue
-        clean = apply_grid_mask(raw, masks)
+    clean = apply_grid_mask(raw, masks)
+    h, w  = raw.shape[:2]
 
-        # Canonical mask for this image — scale spans to match actual image size
-        h_img, w_img = raw.shape[:2]
-        if (h_img, w_img) in masks:
-            cm = masks[(h_img, w_img)]
-            can_rows = cm['grid_rows']
-            can_cols = cm['grid_cols']
-        else:
-            nearest_k = min(masks.keys(), key=lambda k: abs(k[0]-h_img)+abs(k[1]-w_img))
-            cm = masks[nearest_k]
-            sh = h_img / nearest_k[0]
-            sw = w_img / nearest_k[1]
-            can_rows = [(int(s*sh), int(e*sh)) for s, e in cm['grid_rows']]
-            can_cols = [(int(s*sw), int(e*sw)) for s, e in cm['grid_cols']]
+    # Canonical mask for this image
+    if (h, w) in masks:
+        cm       = masks[(h, w)]
+        can_rows = cm['grid_rows']
+        can_cols = cm['grid_cols']
+    else:
+        nearest_k = min(masks.keys(), key=lambda k: abs(k[0]-h)+abs(k[1]-w))
+        cm  = masks[nearest_k]
+        sh  = h / nearest_k[0]
+        sw  = w / nearest_k[1]
+        can_rows = [(int(s*sh), int(e*sh)) for s, e in cm['grid_rows']]
+        can_cols = [(int(s*sw), int(e*sw)) for s, e in cm['grid_cols']]
 
-        ann, n_res = residual_check(clean, can_rows, can_cols)
+    # Build visual mask (canonical + any per-image extra would need apply internals)
+    mask2d = _make_grid_mask(can_rows, can_cols, h, w)
 
-        mask2d = cm['visual']
-        if mask2d.shape != (h_img, w_img):
-            mask2d = cv2.resize(mask2d, (w_img, h_img), interpolation=cv2.INTER_NEAREST)
+    # Row profiles
+    gray_r  = cv2.cvtColor(raw,   cv2.COLOR_BGR2GRAY).astype(np.float32)
+    gray_c  = cv2.cvtColor(clean, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    prof_r  = gray_r.mean(axis=1)
+    prof_c  = gray_c.mean(axis=1)
+    hp_r    = _highpass(prof_r)
+    hp_c    = _highpass(prof_c)
 
-        lr = lap_ratio_unmasked(raw, clean, mask2d)
+    # Detected extra rows (per-image fallback candidates)
+    PER_IMG_ROW_SIGMA = 0.6
+    PER_IMG_MW        = 8
+    extra_rows = _grid_position_seams(
+        cv2.cvtColor(apply_grid_mask(raw, masks), cv2.COLOR_BGR2GRAY).astype(np.float32).mean(axis=1),
+        h, can_rows, PER_IMG_ROW_SIGMA, PER_IMG_MW)
 
-        results.append((cls, os.path.basename(p), raw, clean, ann, n_res, lr))
-        flag = ' *** RESIDUAL ***' if n_res > 0 else ''
-        print(f'  {cls}/{os.path.basename(p)}: '
-              f'residual={n_res}  lap_unmasked={lr:.3f}{flag}')
+    print(f'Image size: {h}x{w}')
+    print(f'Canonical rows: {can_rows}  cols: {can_cols}')
+    print(f'Extra rows detected by fallback: {extra_rows}')
 
-    total_res  = sum(r[5] for r in results)
-    mean_lap   = float(np.mean([r[6] for r in results])) if results else 0.0
-    print(f'\n=== SUMMARY ===')
-    print(f'  total_residual_lines   : {total_res}')
-    print(f'  mean_lap_unmasked_ratio: {mean_lap:.3f}')
-    print(f'  (1.0 = cloud sharpness unchanged; <0.95 = blur introduced)')
+    # ── Plot ────────────────────────────────────────────────────────────────────
+    fig = plt.figure(figsize=(20, 8))
+    gs  = fig.add_gridspec(1, 4, wspace=0.08)
 
-    # Generate PNG: SHOW_N rows x 3 cols [Raw | Cleaned | Residual]
-    show = results[:SHOW_N]
-    fig, axes = plt.subplots(len(show), 3,
-                             figsize=(15, 4 * len(show)),
-                             squeeze=False)
-    for i, (cls, fname, raw, clean, ann, n_res, lr) in enumerate(show):
-        axes[i][0].imshow(cv2.cvtColor(raw,   cv2.COLOR_BGR2RGB))
-        axes[i][0].set_title(f'Raw  [{cls}]\n{fname}', fontsize=7)
-        axes[i][0].axis('off')
+    ax_raw   = fig.add_subplot(gs[0])
+    ax_prof  = fig.add_subplot(gs[1])
+    ax_mask  = fig.add_subplot(gs[2])
+    ax_clean = fig.add_subplot(gs[3])
 
-        axes[i][1].imshow(cv2.cvtColor(clean, cv2.COLOR_BGR2RGB))
-        axes[i][1].set_title(f'Cleaned  lap_unmask={lr:.3f}', fontsize=7)
-        axes[i][1].axis('off')
+    # Raw
+    ax_raw.imshow(cv2.cvtColor(raw, cv2.COLOR_BGR2RGB))
+    ax_raw.set_title(f'Raw\n{os.path.basename(img_path)}', fontsize=8)
+    ax_raw.axis('off')
 
-        axes[i][2].imshow(cv2.cvtColor(ann,   cv2.COLOR_BGR2RGB))
-        col = 'red' if n_res > 0 else 'green'
-        axes[i][2].set_title(f'Residual={n_res}  (red=detected)', fontsize=7, color=col)
-        axes[i][2].axis('off')
+    # Row profile graph — raw (blue) and clean (orange), high-pass residual (green)
+    rows_idx = np.arange(h)
+    ax_prof.plot(prof_r, rows_idx, color='steelblue',  lw=1,   label='raw mean')
+    ax_prof.plot(prof_c, rows_idx, color='darkorange',  lw=1,   label='clean mean')
+    ax_prof.plot(hp_r,   rows_idx, color='green',       lw=0.7, alpha=0.6, label='raw HP')
+    # Mark candidate seam rows
+    for divisor in (3, 4):
+        spacing = h // divisor
+        for i in range(1, divisor):
+            pos = i * spacing
+            ax_prof.axhline(pos, color='red', lw=0.5, alpha=0.5, ls='--')
+    # Mark canonical rows
+    for s, e in can_rows:
+        ax_prof.axhspan(s, e, color='blue', alpha=0.15)
+    # Mark extra rows
+    for s, e in extra_rows:
+        ax_prof.axhspan(s, e, color='orange', alpha=0.3)
+    ax_prof.set_title('Row profile\n(red=grid candidates, blue=canonical, orange=extra)', fontsize=7)
+    ax_prof.set_xlabel('brightness / HP value')
+    ax_prof.set_ylabel('row index')
+    ax_prof.invert_yaxis()
+    ax_prof.legend(fontsize=6)
+    ax_prof.grid(True, lw=0.3)
+
+    # Mask
+    ax_mask.imshow(mask2d, cmap='gray')
+    ax_mask.set_title('Canonical mask', fontsize=8)
+    ax_mask.axis('off')
+
+    # Cleaned
+    ax_clean.imshow(cv2.cvtColor(clean, cv2.COLOR_BGR2RGB))
+    ax_clean.set_title('Cleaned', fontsize=8)
+    ax_clean.axis('off')
 
     plt.suptitle(
-        f'Grid QA  |  total_residual={total_res}  mean_lap_unmasked={mean_lap:.3f}',
-        fontsize=11, y=1.002)
-    plt.tight_layout()
+        f'Grid debug  |  {os.path.basename(img_path)}  |  {h}x{w}',
+        fontsize=10)
+
     os.makedirs(OUT_DIR, exist_ok=True)
-    plt.savefig(OUT_PNG, dpi=90, bbox_inches='tight')
+    plt.savefig(OUT_PNG, dpi=120, bbox_inches='tight')
     plt.close()
-    print(f'\nSaved -> {OUT_PNG}')
+    print(f'Saved -> {OUT_PNG}')
 
 
 if __name__ == '__main__':

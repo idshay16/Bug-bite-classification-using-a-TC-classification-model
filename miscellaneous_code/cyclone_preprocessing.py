@@ -86,6 +86,8 @@ def _interp_cols(out, cols, w):
             out[:, s + i] = (1.0 - t) * out[:, left] + t * out[:, right]
 
 
+
+
 def _exclude_overlapping(spans, known):
     """Remove spans that overlap with any span in `known`."""
     return [
@@ -108,9 +110,9 @@ def _grid_position_seams(profile, length, already_done,
     pixel in that window exceeds thresh_sigma * std, the local peak and its
     contiguous anomaly span are returned as a seam.
     """
-    # Build candidate positions from divisors 3 and 4
+    # Build candidate positions from divisors 3–6 (covers 3×3, 4×4, 5×5, 6×6 grids)
     candidates = set()
-    for divisor in (3, 4):
+    for divisor in (3, 4, 5, 6):
         spacing = length // divisor
         for i in range(1, divisor):
             pos = i * spacing
@@ -136,12 +138,15 @@ def _grid_position_seams(profile, length, already_done,
         peak_abs = np.abs(window).max()
         if peak_abs <= thresh_sigma * s:
             continue
-        # Locate the peak and expand to the full contiguous anomaly span
+        # Locate the peak and expand to the full contiguous anomaly span.
+        # Use thresh_sigma*s (detection threshold) for expansion, not s (full std),
+        # so weak seams (signal < s but > thresh_sigma*s) get a proper span width.
         peak = lo + int(np.argmax(np.abs(window)))
         start, end = peak, peak + 1
-        while start > edge_margin and abs(hp[start - 1]) > s:
+        expand_thresh = thresh_sigma * s
+        while start > edge_margin and abs(hp[start - 1]) > expand_thresh:
             start -= 1
-        while end < length - edge_margin and abs(hp[end]) > s:
+        while end < length - edge_margin and abs(hp[end]) > expand_thresh:
             end += 1
         if (end - start) <= max_line_width:
             results.append((int(start), int(end)))
@@ -278,68 +283,43 @@ def build_grid_masks(src_dir, thresh_sigma=0.7, max_line_width=8,
     return masks, means, samples
 
 
-def apply_grid_mask(img_bgr, masks):
-    """Remove grid seams with minimal blurring.
+def apply_grid_mask(img_bgr, masks=None, return_count=False):
+    """Remove grid seams from a single image using per-image HP spike detection.
 
-    Steps:
-      1. (Phase 1) Coastline inpainting: no-op (coast_mask all zeros).
-      2. Skip-aware linear interpolation for canonical grid rows.
-      3. Skip-aware linear interpolation for canonical grid cols.
-      4. Per-image fallback (high-pass, sigma=2.0): re-detect on the
-         partially-cleaned image using the same high-pass approach as the
-         canonical detection.  The high-pass filter removes broad TC storm
-         features (which span 50-100px in the profile) before thresholding,
-         so only narrow grid seams (1-6px) are detected.
-         max_line_width=6 additionally rejects any wider false positive.
+    Detects seam lines directly on this image's brightness profile via
+    high-pass analysis (_flag_ranges).  No canonical/population mask is used —
+    each image is cleaned based solely on its own brightness spikes.
 
-    Falls back to nearest canonical group for anomalous sizes.
+    Col sigma lower (1.2): col seams are thin, well-defined spikes.
+    Row sigma higher (2.0): avoids cloud-band horizontal features as FPs.
+    Row max_line_width wider (64): tile calibration steps create broader HP spans.
+
+    `masks` accepted but ignored — kept for call-site compatibility.
     """
-    PER_IMG_SIGMA = 1.2  # position-constrained → safe to go low; 2.0 missed visible seams
-    PER_IMG_MW    = 8    # allow slightly wider spans for individual-image seams
+    COL_SIGMA = 1.2
+    ROW_SIGMA = 2.0
+    COL_MW    = 8
+    ROW_MW    = 64
+    EDGE      = 5
 
     h, w = img_bgr.shape[:2]
-    if (h, w) in masks:
-        m          = masks[(h, w)]
-        grid_rows  = m['grid_rows']
-        grid_cols  = m['grid_cols']
-        coast_mask = m['coast_mask']
-    else:
-        nearest    = min(masks.keys(), key=lambda k: abs(k[0] - h) + abs(k[1] - w))
-        m          = masks[nearest]
-        sh, sw     = h / nearest[0], w / nearest[1]
-        grid_rows  = [(int(s * sh), int(e * sh)) for s, e in m['grid_rows']]
-        grid_cols  = [(int(s * sw), int(e * sw)) for s, e in m['grid_cols']]
-        coast_mask = cv2.resize(m['coast_mask'], (w, h), interpolation=cv2.INTER_NEAREST)
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    out  = img_bgr.copy().astype(np.float32)
 
-    out = img_bgr.copy().astype(np.float32)
+    # Cols first, then rows on the col-cleaned image
+    # (col cleaning can reveal row seams obscured by col brightness artifacts)
+    cols = _flag_ranges(gray.mean(axis=0), w, COL_SIGMA, COL_MW, EDGE)
+    if cols:
+        _interp_cols(out, cols, w)
 
-    # Step 1: coastline inpainting (Phase 1: coast_mask all zeros — no-op)
-    coast_mask8 = (coast_mask > 0).astype(np.uint8) * 255
-    if coast_mask8.any():
-        out = cv2.inpaint(
-            out.astype(np.uint8), coast_mask8,
-            inpaintRadius=7, flags=cv2.INPAINT_TELEA
-        ).astype(np.float32)
+    gray2 = cv2.cvtColor(out.astype(np.uint8), cv2.COLOR_BGR2GRAY).astype(np.float32)
+    rows  = _flag_ranges(gray2.mean(axis=1), h, ROW_SIGMA, ROW_MW, EDGE)
+    if rows:
+        _interp_rows(out, rows, h)
 
-    # Steps 2-3: canonical grid seam interpolation (smooths the hard tile edges
-    # left by step 0, as well as removing thin seam-line pixels)
-    _interp_rows(out, grid_rows, h)
-    _interp_cols(out, grid_cols, w)
+    cleaned = np.clip(out, 0, 255).astype(np.uint8)
 
-    # Step 4: position-constrained per-image fallback, applied sequentially so
-    #   that col cleaning can expose row seams that were masked by col artifacts
-    #   and vice versa.  Two passes: cols first, then rows on the updated image.
-    gray_clean = cv2.cvtColor(out.astype(np.uint8), cv2.COLOR_BGR2GRAY).astype(np.float32)
-    raw_cols   = _flag_ranges(gray_clean.mean(axis=0), w, PER_IMG_SIGMA, PER_IMG_MW, edge_margin=5)
-    extra_cols = _exclude_overlapping(raw_cols, grid_cols)
-    if extra_cols:
-        _interp_cols(out, extra_cols, w)
-        grid_cols = list(grid_cols) + extra_cols
+    if return_count:
+        return cleaned, len(cols) + len(rows)
 
-    gray_clean = cv2.cvtColor(out.astype(np.uint8), cv2.COLOR_BGR2GRAY).astype(np.float32)
-    extra_rows = _grid_position_seams(gray_clean.mean(axis=1), h,
-                                      grid_rows, PER_IMG_SIGMA, PER_IMG_MW)
-    if extra_rows:
-        _interp_rows(out, extra_rows, h)
-
-    return np.clip(out, 0, 255).astype(np.uint8)
+    return cleaned
