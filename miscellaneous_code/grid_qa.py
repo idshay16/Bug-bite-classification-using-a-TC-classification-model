@@ -18,7 +18,7 @@ sys.path.insert(0, SCRIPT_DIR)
 
 from cyclone_preprocessing import (build_grid_masks, apply_grid_mask,
                                    _flag_ranges, _make_grid_mask,
-                                   _grid_position_seams)
+                                   _exclude_overlapping, _grid_position_seams)
 
 SRC_DIR   = os.path.join(PROJECT_ROOT, 'Cyclone-Data',
                          'data_categorised_rgb', 'data_categorised_rgb')
@@ -47,8 +47,8 @@ def residual_check(clean_bgr, canonical_rows, canonical_cols):
     h, w = gray.shape
     rows = _grid_position_seams(gray.mean(axis=1), h,
                                 canonical_rows, RESIDUAL_SIGMA, RESIDUAL_MAX_W)
-    cols = _grid_position_seams(gray.mean(axis=0), w,
-                                canonical_cols, RESIDUAL_SIGMA, RESIDUAL_MAX_W)
+    raw_cols = _flag_ranges(gray.mean(axis=0), w, RESIDUAL_SIGMA, RESIDUAL_MAX_W)
+    cols = _exclude_overlapping(raw_cols, canonical_cols)
     ann  = clean_bgr.copy()
     for s, e in rows:
         ann[s:e, :] = (0, 0, 255)
