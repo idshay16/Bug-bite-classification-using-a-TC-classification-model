@@ -11,14 +11,46 @@ from torchvision import datasets, transforms
 from tqdm.auto import tqdm
 
 
-def get_pytorch_loaders(train_dir, val_dir, img_size=310, batch_size=4):
-    transform = transforms.Compose([
+def get_pytorch_loaders(train_dir, val_dir, img_size=310, batch_size=4, augment=False):
+    _norm = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    if augment == 'strong':
+        # Cyclone satellite imagery: radially symmetric → full rotation & vertical flip are valid.
+        # Aggressive crop (0.35) forces multi-scale invariance and avoids always showing the full grid.
+        # Wider blur sigma (3.0) further suppresses any residual grid-line seams after inpainting.
+        # RandomErasing (post-norm, small patches) prevents the model latching onto fixed artifact zones.
+        train_transform = transforms.Compose([
+            transforms.RandomResizedCrop(img_size, scale=(0.35, 1.0)),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomVerticalFlip(),
+            transforms.RandomRotation(180),
+            transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.05),
+            transforms.RandomGrayscale(p=0.05),
+            transforms.GaussianBlur(kernel_size=5, sigma=(0.5, 3.0)),
+            transforms.ToTensor(),
+            _norm,
+            transforms.RandomErasing(p=0.2, scale=(0.02, 0.1), value='random'),
+        ])
+    elif augment:
+        train_transform = transforms.Compose([
+            transforms.Resize((img_size, img_size)),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomRotation(10),
+            transforms.ToTensor(),
+            _norm,
+        ])
+    else:
+        train_transform = transforms.Compose([
+            transforms.Resize((img_size, img_size)),
+            transforms.ToTensor(),
+            _norm,
+        ])
+    val_transform = transforms.Compose([
         transforms.Resize((img_size, img_size)),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
     ])
-    train_ds = datasets.ImageFolder(train_dir, transform=transform)
-    val_ds   = datasets.ImageFolder(val_dir,   transform=transform)
+    train_ds = datasets.ImageFolder(train_dir, transform=train_transform)
+    val_ds   = datasets.ImageFolder(val_dir,   transform=val_transform)
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,  num_workers=0)
     val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False, num_workers=0)
     return train_loader, val_loader, train_ds.classes
@@ -26,12 +58,18 @@ def get_pytorch_loaders(train_dir, val_dir, img_size=310, batch_size=4):
 
 def train_pytorch_model(model, train_loader, val_loader, device,
                         phase1_epochs=5, phase2_epochs=20, patience=5, save_path=None,
-                        phase1_batch_size=16):
+                        phase1_batch_size=None, phase2_batch_size=None, label_smoothing=0.0):
     torch.cuda.empty_cache()
     model = model.to(device)
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
     history = {'acc': [], 'val_acc': [], 'loss': [], 'val_loss': []}
 
+    use_amp = device.type == 'cuda'
+    # bfloat16 has float32-range exponents — avoids NaN in transformer SDPA under AMP
+    scaler  = torch.amp.GradScaler('cuda', enabled=False)
+
+    if phase1_batch_size is None:
+        phase1_batch_size = train_loader.batch_size
     p1_train_loader = DataLoader(train_loader.dataset, batch_size=phase1_batch_size,
                                  shuffle=True, num_workers=0)
     p1_val_loader   = DataLoader(val_loader.dataset,   batch_size=phase1_batch_size,
@@ -49,13 +87,15 @@ def train_pytorch_model(model, train_loader, val_loader, device,
                 imgs, labels = imgs.to(device), labels.to(device)
                 if training:
                     optimizer.zero_grad()
-                out = model(imgs)
-                loss = criterion(out, labels)
+                with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=use_amp):
+                    out  = model(imgs)
+                    loss = criterion(out, labels)
                 if training:
-                    loss.backward()
-                    optimizer.step()
+                    scaler.scale(loss).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
                 total_loss += loss.item() * imgs.size(0)
-                preds = out.argmax(1)
+                preds = out.detach().argmax(1)
                 correct += (preds == labels).sum().item()
                 total += imgs.size(0)
                 if not training:
@@ -107,13 +147,24 @@ def train_pytorch_model(model, train_loader, val_loader, device,
 
     run_phase(phase1_epochs, optimizer, 'Phase 1: training classifier head',
               p1_train_loader, p1_val_loader)
+    del p1_train_loader, p1_val_loader
+    torch.cuda.empty_cache()
 
     for param in model.parameters():
         param.requires_grad = True
+    if hasattr(model, 'set_grad_checkpointing'):
+        model.set_grad_checkpointing(True)
+    if phase2_batch_size is not None:
+        p2_train_loader = DataLoader(train_loader.dataset, batch_size=phase2_batch_size,
+                                     shuffle=True,  num_workers=0)
+        p2_val_loader   = DataLoader(val_loader.dataset,   batch_size=phase2_batch_size,
+                                     shuffle=False, num_workers=0)
+    else:
+        p2_train_loader, p2_val_loader = train_loader, val_loader
     optimizer = optim.AdamW(model.parameters(), lr=5e-6, weight_decay=1e-2)
     patience_ctr = 0
     run_phase(phase2_epochs, optimizer, 'Phase 2: fine-tuning full backbone',
-              train_loader, val_loader)
+              p2_train_loader, p2_val_loader)
 
     if best_state:
         model.load_state_dict(best_state)
@@ -129,6 +180,26 @@ def plot_pytorch_history(history):
     ax2.plot(history['val_loss'], label='Val Loss')
     ax2.set_title('Loss'); ax2.legend()
     plt.tight_layout(); plt.show()
+
+
+def get_pt_probs_preds(model, loader, device):
+    """Return (true_labels, argmax_preds, softmax_probs) lists for a PyTorch model."""
+    model.eval()
+    all_labels, all_preds, all_probs = [], [], []
+    with torch.no_grad():
+        for imgs, labels in loader:
+            out   = model(imgs.to(device))
+            probs = torch.softmax(out, dim=1).cpu().numpy()
+            preds = out.argmax(1).cpu().numpy()
+            all_probs.extend(probs.tolist())
+            all_preds.extend(preds.tolist())
+            all_labels.extend(labels.numpy().tolist())
+    return all_labels, all_preds, all_probs
+
+
+def get_backbone_state_dict(state_dict, head_prefix='head.'):
+    """Strip classifier head keys — lets cyclone backbone transfer into a fresh model."""
+    return {k: v for k, v in state_dict.items() if not k.startswith(head_prefix)}
 
 
 def evaluate_pytorch_model(model, val_loader, class_names, device):
