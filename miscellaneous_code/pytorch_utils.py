@@ -51,8 +51,10 @@ def get_pytorch_loaders(train_dir, val_dir, img_size=310, batch_size=4, augment=
     ])
     train_ds = datasets.ImageFolder(train_dir, transform=train_transform)
     val_ds   = datasets.ImageFolder(val_dir,   transform=val_transform)
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,  num_workers=0)
-    val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False, num_workers=0)
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
+                              num_workers=4, pin_memory=True, persistent_workers=True)
+    val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False,
+                              num_workers=4, pin_memory=True, persistent_workers=True)
     return train_loader, val_loader, train_ds.classes
 
 
@@ -71,9 +73,9 @@ def train_pytorch_model(model, train_loader, val_loader, device,
     if phase1_batch_size is None:
         phase1_batch_size = train_loader.batch_size
     p1_train_loader = DataLoader(train_loader.dataset, batch_size=phase1_batch_size,
-                                 shuffle=True, num_workers=0)
+                                 shuffle=True,  num_workers=4, pin_memory=True, persistent_workers=True)
     p1_val_loader   = DataLoader(val_loader.dataset,   batch_size=phase1_batch_size,
-                                 shuffle=False, num_workers=0)
+                                 shuffle=False, num_workers=4, pin_memory=True, persistent_workers=True)
 
     def run_epoch(loader, optimizer=None, desc=''):
         training = optimizer is not None
@@ -156,13 +158,15 @@ def train_pytorch_model(model, train_loader, val_loader, device,
         model.set_grad_checkpointing(True)
     if phase2_batch_size is not None:
         p2_train_loader = DataLoader(train_loader.dataset, batch_size=phase2_batch_size,
-                                     shuffle=True,  num_workers=0)
+                                     shuffle=True,  num_workers=4, pin_memory=True, persistent_workers=True)
         p2_val_loader   = DataLoader(val_loader.dataset,   batch_size=phase2_batch_size,
-                                     shuffle=False, num_workers=0)
+                                     shuffle=False, num_workers=4, pin_memory=True, persistent_workers=True)
     else:
         p2_train_loader, p2_val_loader = train_loader, val_loader
     optimizer = optim.AdamW(model.parameters(), lr=5e-6, weight_decay=1e-2)
-    patience_ctr = 0
+    # Reset patience and best_val_loss independently per phase — phase 2 unfreezes the backbone
+    # so initial loss often rises above the phase 1 best, which would immediately drain patience.
+    patience_ctr, best_val_loss = 0, float('inf')
     run_phase(phase2_epochs, optimizer, 'Phase 2: fine-tuning full backbone',
               p2_train_loader, p2_val_loader)
 
