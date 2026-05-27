@@ -66,7 +66,7 @@ def train_pytorch_model(model, train_loader, val_loader, device,
         counts = torch.zeros(len(train_loader.dataset.classes))
         for _, lbl in train_loader.dataset.samples:
             counts[lbl] += 1
-        weights = (counts.sum() / (len(counts) * counts)).to(device)
+        weights = (counts.sum() / (len(counts) * counts)).sqrt().to(device)
         print(f'Class weights: { {c: f"{w:.2f}" for c, w in zip(train_loader.dataset.classes, weights.cpu())} }')
     else:
         weights = None
