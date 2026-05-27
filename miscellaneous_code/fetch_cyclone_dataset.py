@@ -44,6 +44,7 @@ RETRY_TOTAL = 5
 RETRY_BACKOFF = 1.0
 RATE_JITTER_SEC = 0.2
 INDEX_WORKERS = 6
+EXTRACT_WORKERS = 1
 
 CATEGORIES = {
     "cat1_tropical_depression": (0,    33),
@@ -72,7 +73,7 @@ DOWNLOAD_SEMAPHORE = None
 # ── HELPERS ───────────────────────────────────────────────────────────
 
 def log(msg, warn=False):
-    print(f"  {'⚠' if warn else '✓'}  {msg}")
+    print(f"  {'!' if warn else '+'}  {msg}")
 
 def get_session():
     session = getattr(_session_local, "session", None)
@@ -381,7 +382,7 @@ def extract_frames(nc_path, n_wanted, done_set, out_dir, key):
 
 # ── MAIN ──────────────────────────────────────────────────────────────
 
-def run(trial, target, workers, cleanup_cat1, run_filter, filter_out, filter_mode):
+def run(trial, target, workers, cleanup_cat1, run_filter, filter_out, filter_mode, serial_extract, extract_workers):
     global DOWNLOAD_SEMAPHORE
     target = TRIAL_TARGET if trial else target
 
@@ -439,32 +440,109 @@ def run(trial, target, workers, cleanup_cat1, run_filter, filter_out, filter_mod
 
         log(f"  Submitting {len(to_submit)} downloads")
 
-        # Parallelize downloads and extraction: downloads run in download_pool
-        # while extraction runs concurrently in extract_pool to maximize throughput.
-        with ThreadPoolExecutor(max_workers=workers) as download_pool, \
-             ThreadPoolExecutor(max_workers=workers) as extract_pool:
-            download_futs = {}
+        if serial_extract:
+            pbar = tqdm(total=len(to_submit), desc=f"  {cat[:20]}", unit="storm")
+            storms_done = 0
             for _, row in to_submit.iterrows():
                 key  = row["hursat_key"]
                 url  = row["hursat_url"]
                 dest = str(tmp_dir / f"{key}.nc")
-                download_futs[download_pool.submit(download_file, key, url, dest)] = (key, row)
 
-            extract_futs = {}
-            pbar = tqdm(as_completed(download_futs), total=len(download_futs),
-                        desc=f"  {cat[:20]}", unit="storm")
-            storms_done = 0
-
-            for fut in pbar:
-                key, row = download_futs[fut]
-                try:
-                    nc_paths = fut.result()
-                except Exception:
-                    nc_paths = []
-
+                nc_paths = download_file(key, url, dest)
                 if not nc_paths:
                     storms_done += 1
-                    # check any finished extractions and update counts
+                    pbar.update(1)
+                    continue
+
+                still_needed = target - counts[cat]
+                if still_needed <= 0:
+                    break
+
+                storms_remaining = len(to_submit) - storms_done
+                frames_this_storm = max(1, math.ceil(
+                    still_needed / max(storms_remaining, 1)
+                ))
+
+                remaining = frames_this_storm
+                remaining_files = len(nc_paths)
+                for nc_path in nc_paths:
+                    if remaining <= 0:
+                        break
+                    per_file = max(1, math.ceil(remaining / max(remaining_files, 1)))
+                    got = extract_frames(nc_path, per_file, done, out_dir, key)
+                    counts[cat] += got
+                    remaining -= per_file
+                    remaining_files -= 1
+
+                storms_done += 1
+                pbar.update(1)
+                pbar.set_postfix({"saved": counts[cat], "target": target})
+
+                if counts[cat] >= target:
+                    break
+            pbar.close()
+        else:
+            # Parallelize downloads and extraction: downloads run in download_pool
+            # while extraction runs concurrently in extract_pool to maximize throughput.
+              with ThreadPoolExecutor(max_workers=workers) as download_pool, \
+                  ThreadPoolExecutor(max_workers=extract_workers) as extract_pool:
+                download_futs = {}
+                for _, row in to_submit.iterrows():
+                    key  = row["hursat_key"]
+                    url  = row["hursat_url"]
+                    dest = str(tmp_dir / f"{key}.nc")
+                    download_futs[download_pool.submit(download_file, key, url, dest)] = (key, row)
+
+                extract_futs = {}
+                pbar = tqdm(as_completed(download_futs), total=len(download_futs),
+                            desc=f"  {cat[:20]}", unit="storm")
+                storms_done = 0
+
+                for fut in pbar:
+                    key, row = download_futs[fut]
+                    try:
+                        nc_paths = fut.result()
+                    except Exception:
+                        nc_paths = []
+
+                    if not nc_paths:
+                        storms_done += 1
+                        # check any finished extractions and update counts
+                        for ef in list(extract_futs):
+                            if ef.done():
+                                try:
+                                    got = ef.result()
+                                except Exception:
+                                    got = 0
+                                counts[cat] += got
+                                del extract_futs[ef]
+                        continue
+
+                    still_needed = target - counts[cat]
+                    if still_needed <= 0:
+                        for f in download_futs:
+                            f.cancel()
+                        break
+
+                    storms_remaining = len(to_submit) - storms_done
+                    frames_this_storm = max(1, math.ceil(
+                        still_needed / max(storms_remaining, 1)
+                    ))
+
+                    # schedule extraction concurrently across all .nc files
+                    remaining = frames_this_storm
+                    remaining_files = len(nc_paths)
+                    for idx, nc_path in enumerate(nc_paths):
+                        if remaining <= 0:
+                            break
+                        per_file = max(1, math.ceil(remaining / max(remaining_files, 1)))
+                        ef = extract_pool.submit(extract_frames, nc_path,
+                                                 per_file, done, out_dir, key)
+                        extract_futs[ef] = key
+                        remaining -= per_file
+                        remaining_files -= 1
+
+                    # opportunistically collect finished extractions
                     for ef in list(extract_futs):
                         if ef.done():
                             try:
@@ -473,57 +551,22 @@ def run(trial, target, workers, cleanup_cat1, run_filter, filter_out, filter_mod
                                 got = 0
                             counts[cat] += got
                             del extract_futs[ef]
-                    continue
 
-                still_needed = target - counts[cat]
-                if still_needed <= 0:
-                    for f in download_futs:
-                        f.cancel()
-                    break
+                    storms_done += 1
+                    pbar.set_postfix({"saved": counts[cat], "target": target})
 
-                storms_remaining = len(to_submit) - storms_done
-                frames_this_storm = max(1, math.ceil(
-                    still_needed / max(storms_remaining, 1)
-                ))
-
-                # schedule extraction concurrently across all .nc files
-                remaining = frames_this_storm
-                remaining_files = len(nc_paths)
-                for idx, nc_path in enumerate(nc_paths):
-                    if remaining <= 0:
+                    if counts[cat] >= target:
+                        for f in download_futs:
+                            f.cancel()
                         break
-                    per_file = max(1, math.ceil(remaining / max(remaining_files, 1)))
-                    ef = extract_pool.submit(extract_frames, nc_path,
-                                             per_file, done, out_dir, key)
-                    extract_futs[ef] = key
-                    remaining -= per_file
-                    remaining_files -= 1
 
-                # opportunistically collect finished extractions
-                for ef in list(extract_futs):
-                    if ef.done():
-                        try:
-                            got = ef.result()
-                        except Exception:
-                            got = 0
-                        counts[cat] += got
-                        del extract_futs[ef]
-
-                storms_done += 1
-                pbar.set_postfix({"saved": counts[cat], "target": target})
-
-                if counts[cat] >= target:
-                    for f in download_futs:
-                        f.cancel()
-                    break
-
-            # wait for any remaining extractions to finish
-            for ef in as_completed(list(extract_futs)):
-                try:
-                    got = ef.result()
-                except Exception:
-                    got = 0
-                counts[cat] += got
+                # wait for any remaining extractions to finish
+                for ef in as_completed(list(extract_futs)):
+                    try:
+                        got = ef.result()
+                    except Exception:
+                        got = 0
+                    counts[cat] += got
 
         save_resume_log(base, done)
         log(f"  {cat}: {counts[cat]:,} images")
@@ -570,6 +613,10 @@ if __name__ == "__main__":
                    help="Output folder for morphology filter")
     p.add_argument("--filter-mode", choices=["copy", "move"], default="copy",
                    help="Morphology filter file handling")
+    p.add_argument("--serial-extract", action="store_true",
+                   help="Download then extract sequentially (single-threaded)")
+    p.add_argument("--extract-workers", type=int, default=EXTRACT_WORKERS,
+                   help="Number of parallel extract workers")
     args = p.parse_args()
 
     if args.output:
@@ -582,4 +629,5 @@ if __name__ == "__main__":
 
     run(trial=args.trial, target=args.target, workers=args.workers,
         cleanup_cat1=args.cleanup_cat1, run_filter=args.run_filter,
-        filter_out=args.filter_out, filter_mode=args.filter_mode)
+        filter_out=args.filter_out, filter_mode=args.filter_mode,
+        serial_extract=args.serial_extract, extract_workers=args.extract_workers)

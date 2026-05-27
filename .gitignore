@@ -7,6 +7,8 @@ Cyclone-Data
 Yolo_Bug_Data
 Bug-Data
 cyclone_dataset
+cyclone_data_clean
+cyclone_data_split
 
 # Model Weights (not uploaded due to repo storage limits)
 model_weights

@@ -1,255 +1,234 @@
 #!/usr/bin/env python3
 """
-verify_dataset.py — Spot-check the downloaded cyclone dataset.
+verify_dataset.py — Inspect dataset quality after filtering.
 
-Run this after fetch_cyclone_dataset.py to:
-  • Print a per-category image count
-  • Check a sample of images for corruption
-  • Generate a sample_grid.png so you can visually confirm the imagery
-  • Print ready-to-use PyTorch / Keras loading snippets
+Works with any directory that has category subdirectories (cyclone_dataset,
+cyclone_data_clean/KEEP, cnn_labels/positive, etc.).
 
 Usage:
-  python verify_dataset.py
-  python verify_dataset.py --dir path/to/cyclone_dataset
+  python miscellaneous_code/verify_dataset.py
+  python miscellaneous_code/verify_dataset.py --dir cyclone_data_clean/KEEP
+  python miscellaneous_code/verify_dataset.py --dir cyclone_data_clean/KEEP --samples 10
+  python miscellaneous_code/verify_dataset.py --dir cyclone_data_clean/KEEP --csv cyclone_data_clean/filter_report.csv
 """
 
-import sys
-import random
 import argparse
-import numpy as np
+import csv
+import random
+import sys
+from pathlib import Path
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from pathlib import Path
+import numpy as np
 from PIL import Image, UnidentifiedImageError
 
-# ─────────────────────────────────────────────────────────────────────
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp"}
+CORRUPTION_SAMPLE = 50
 
-CATEGORIES = [
-    "cat1_tropical_depression",
-    "cat2_tropical_storm",
-    "cat3_hurricane_cat12",
-    "cat4_hurricane_cat34",
-    "cat5_hurricane_cat5",
-]
-
-LABELS = {
-    "cat1_tropical_depression": "Tropical Depression  (< 34 kt)",
-    "cat2_tropical_storm":      "Tropical Storm       (34–63 kt)",
-    "cat3_hurricane_cat12":     "Hurricane Cat 1–2    (64–95 kt)",
-    "cat4_hurricane_cat34":     "Hurricane Cat 3–4    (96–136 kt)",
-    "cat5_hurricane_cat5":      "Major Hurricane      (≥ 137 kt)",
-}
-
-# How many images to spot-check per category for corruption.
-# Checking all 4,000 would take minutes — 50 is enough to catch systemic issues.
-CORRUPTION_SAMPLE_SIZE = 50
-
-# How many sample images to show per category in the grid
-GRID_SAMPLES = 4
-
-# ─────────────────────────────────────────────────────────────────────
 
 def sep(title=""):
     print()
-    print("─" * 60)
+    print("─" * 64)
     if title:
         print(f"  {title}")
-        print("─" * 60)
+        print("─" * 64)
+
 
 def check_image(path):
     try:
         img = Image.open(path)
         img.verify()
-        img = Image.open(path)  # reopen after verify (verify closes it)
+        img = Image.open(path)
         return True, img.width, img.height
     except Exception:
         return False, 0, 0
 
-def load_rgb(path):
+
+def load_gray(path):
     try:
         return np.array(Image.open(path).convert("L"))
     except Exception:
         return None
 
-# ─────────────────────────────────────────────────────────────────────
 
-def verify(dataset_dir):
+def collect_categories(base: Path):
+    """Return sorted list of (cat_name, [image_paths]) for all non-empty subdirs."""
+    cats = []
+    for d in sorted(base.iterdir()):
+        if not d.is_dir():
+            continue
+        imgs = [p for p in d.rglob("*") if p.is_file() and p.suffix.lower() in IMAGE_EXTS]
+        if imgs:
+            cats.append((d.name, sorted(imgs)))
+    return cats
+
+
+def load_filter_csv(csv_path: Path):
+    """Return {path_str: row_dict} from filter_report.csv."""
+    data = {}
+    if not csv_path or not csv_path.exists():
+        return data
+    with open(csv_path, encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            data[row["path"]] = row
+    return data
+
+
+def print_filter_stats(cats, filter_data):
+    if not filter_data:
+        return
+    sep("Filter Statistics (from CSV)")
+    total_keep = total_review = 0
+    flag_counts = {}
+    for cat, imgs in cats:
+        keep = review = 0
+        for p in imgs:
+            row = filter_data.get(str(p))
+            if row is None:
+                continue
+            if row.get("decision") == "keep":
+                keep += 1
+                for flag in ("profile_range_ok", "streak_ok", "bright_fill_ok", "edge_ok"):
+                    if row.get(flag) == "0":
+                        flag_counts[flag] = flag_counts.get(flag, 0) + 1
+            else:
+                review += 1
+        total_keep += keep
+        total_review += review
+        if keep + review > 0:
+            pct = 100 * keep / (keep + review)
+            print(f"  {cat:<40}  keep={keep:>5}  review={review:>5}  ({pct:.0f}% pass)")
+
+    print(f"\n  Total keep: {total_keep}  review: {total_review}")
+
+    if flag_counts:
+        print("\n  Hard-reject breakdown (images failing each check):")
+        for flag, n in sorted(flag_counts.items(), key=lambda x: -x[1]):
+            print(f"    {flag:<20}  {n:>5} rejected")
+
+
+def build_grid(cats, n_samples: int, out_path: Path, title: str):
+    n_rows = len(cats)
+    n_cols = n_samples
+
+    fig_w = min(n_cols * 2.5, 40)
+    fig_h = min(n_rows * 2.8, 60)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_w, fig_h),
+                              squeeze=False)
+    fig.patch.set_facecolor("#0d0d0d")
+
+    for row, (cat, imgs) in enumerate(cats):
+        sample = random.sample(imgs, min(n_samples, len(imgs)))
+        for col in range(n_cols):
+            ax = axes[row][col]
+            ax.set_facecolor("#0d0d0d")
+            ax.axis("off")
+            if col < len(sample):
+                arr = load_gray(sample[col])
+                if arr is not None:
+                    ax.imshow(arr, cmap="gray", vmin=0, vmax=255)
+                    ax.set_title(sample[col].stem[:18], color="#888", fontsize=5)
+            else:
+                ax.text(0.5, 0.5, "—", ha="center", va="center",
+                        color="#444", fontsize=12, transform=ax.transAxes)
+        axes[row][0].set_ylabel(
+            cat, color="white", fontsize=7,
+            rotation=0, labelpad=120, va="center",
+            fontfamily="monospace",
+        )
+
+    plt.suptitle(title, color="white", fontsize=10, y=1.005)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=130, bbox_inches="tight", facecolor="#0d0d0d")
+    plt.close()
+    print(f"  Saved: {out_path.resolve()}")
+
+
+def verify(dataset_dir: str, csv_path: Path | None, n_samples: int, seed: int):
+    random.seed(seed)
     base = Path(dataset_dir)
     if not base.exists():
-        print(f"[ERROR] Directory not found: {base.resolve()}")
+        print(f"[ERROR] Not found: {base.resolve()}")
         sys.exit(1)
 
     sep("Dataset Verification Report")
     print(f"  Path: {base.resolve()}")
 
-    counts       = {}
-    corrupt_hits = {}
-    sample_imgs  = {}
-    all_sizes    = {}
+    cats = collect_categories(base)
+    if not cats:
+        print("  No category subdirectories with images found.")
+        sys.exit(1)
 
-    # ── Per-category scan ─────────────────────────────────────────────
+    filter_data = load_filter_csv(csv_path)
+
+    # ── Per-category counts ───────────────────────────────────────────
     sep("Image Counts")
     total = 0
-    for cat in CATEGORIES:
-        cat_dir = base / cat
-        if not cat_dir.exists():
-            print(f"  ✗  MISSING folder: {cat}/")
-            counts[cat] = 0
-            continue
-
-        images = sorted(cat_dir.glob("*.png")) + sorted(cat_dir.glob("*.jpg"))
-        n = len(images)
-        counts[cat] = n
+    corrupt_total = 0
+    for cat, imgs in cats:
+        n = len(imgs)
         total += n
+        sample = random.sample(imgs, min(CORRUPTION_SAMPLE, n))
+        corrupt = sum(1 for p in sample if not check_image(p)[0])
+        corrupt_total += corrupt
+        corrupt_str = f"  !! {corrupt} corrupt in sample" if corrupt else ""
+        print(f"  {cat:<40}  {n:>6,} images{corrupt_str}")
 
-        # Corruption spot-check on a random sample
-        sample = random.sample(images, min(CORRUPTION_SAMPLE_SIZE, n))
-        corrupt = 0
-        sizes   = set()
-        ok_imgs = []
-        for p in sample:
-            ok, w, h = check_image(p)
-            if ok:
-                sizes.add((w, h))
-                if len(ok_imgs) < GRID_SAMPLES:
-                    ok_imgs.append(p)
-            else:
-                corrupt += 1
+    print(f"\n  Total: {total:,} images in {len(cats)} categories")
 
-        corrupt_hits[cat] = corrupt
-        all_sizes[cat]    = sizes
-        sample_imgs[cat]  = ok_imgs
-
-        size_str   = ", ".join(f"{w}×{h}" for w, h in sizes) or "—"
-        corrupt_str = f"  ⚠ {corrupt} corrupt in sample" if corrupt else ""
-        print(f"  {'✓' if n > 0 else '✗'}  {LABELS[cat]}")
-        print(f"       {n:>5,} images  |  size: {size_str}{corrupt_str}")
-
-    print(f"\n  Total: {total:,} images across {len(CATEGORIES)} categories")
-
-    # ── Balance check ─────────────────────────────────────────────────
+    # ── Balance ───────────────────────────────────────────────────────
     sep("Balance")
-    vals = [counts[c] for c in CATEGORIES]
-    mn, mx = min(vals), max(vals)
-    if mx > 0:
-        ratio = mn / mx
-        bar_max = 30
-        for cat in CATEGORIES:
-            n   = counts[cat]
-            bar = "█" * int((n / mx) * bar_max)
-            print(f"  {bar:<{bar_max}}  {n:>5,}  {LABELS[cat][:25]}")
-        print()
-        status = "✓ Well balanced" if ratio >= 0.9 else \
-                 "~ Acceptable"    if ratio >= 0.7 else \
-                 "⚠ Consider augmenting the smaller categories"
-        print(f"  Balance ratio (min/max): {ratio:.2f}  —  {status}")
+    max_n = max(len(imgs) for _, imgs in cats)
+    bar_w = 30
+    for cat, imgs in cats:
+        n   = len(imgs)
+        bar = "█" * int((n / max_n) * bar_w)
+        print(f"  {bar:<{bar_w}}  {n:>6,}  {cat}")
+    vals = [len(imgs) for _, imgs in cats]
+    ratio = min(vals) / max(vals) if max(vals) else 0
+    status = ("OK" if ratio >= 0.9 else
+              "acceptable" if ratio >= 0.7 else
+              "consider augmenting smaller categories")
+    print(f"\n  Balance ratio (min/max): {ratio:.2f}  —  {status}")
+
+    # ── Filter stats ──────────────────────────────────────────────────
+    print_filter_stats(cats, filter_data)
+
+    # ── Corruption summary ────────────────────────────────────────────
+    sep("Corruption Check")
+    if corrupt_total:
+        print(f"  !! {corrupt_total} corrupt images found in spot-checks — re-run extraction")
+    else:
+        print(f"  OK  No corrupt images in spot-check ({CORRUPTION_SAMPLE} sampled per category)")
 
     # ── Sample grid ───────────────────────────────────────────────────
-    sep(f"Sample Image Grid  →  sample_grid.png")
-    n_rows = len(CATEGORIES)
-    n_cols = GRID_SAMPLES
-    fig, axes = plt.subplots(n_rows, n_cols,
-                             figsize=(n_cols * 2.8, n_rows * 3.0))
-    fig.patch.set_facecolor("#0d0d0d")
-
-    for row, cat in enumerate(CATEGORIES):
-        samples = sample_imgs.get(cat, [])
-        for col in range(n_cols):
-            ax = axes[row][col]
-            ax.set_facecolor("#0d0d0d")
-            ax.axis("off")
-            if col < len(samples):
-                arr = load_rgb(samples[col])
-                if arr is not None:
-                    ax.imshow(arr, cmap="gray", vmin=0, vmax=255)
-            else:
-                ax.text(0.5, 0.5, "—", ha="center", va="center",
-                        color="#333", fontsize=14, transform=ax.transAxes)
-            if col == 0:
-                ax.set_ylabel(
-                    LABELS[cat], color="white", fontsize=7,
-                    rotation=0, labelpad=110, va="center",
-                    fontfamily="monospace"
-                )
-
-    plt.suptitle("Cyclone Dataset — Sample Images by Intensity Category",
-                 color="white", fontsize=11, y=1.01)
-    plt.tight_layout()
+    sep(f"Sample Grid  ({n_samples} per category)")
     grid_path = base / "sample_grid.png"
-    plt.savefig(grid_path, dpi=130, bbox_inches="tight", facecolor="#0d0d0d")
-    plt.close()
-    print(f"  Saved: {grid_path}")
+    build_grid(cats, n_samples, grid_path,
+               f"Dataset Quality Check — {base.name}  (seed={seed})")
 
-    # ── Corrupt summary ───────────────────────────────────────────────
-    total_corrupt = sum(corrupt_hits.values())
-    if total_corrupt > 0:
-        sep(f"⚠ Corruption Detected (in {CORRUPTION_SAMPLE_SIZE}-image samples)")
-        for cat, n in corrupt_hits.items():
-            if n > 0:
-                print(f"  {cat}: {n} corrupt in sample — consider re-running fetch")
-    else:
-        sep("Corruption Check")
-        print(f"  ✓  No corrupt images found in spot-check "
-              f"({CORRUPTION_SAMPLE_SIZE} sampled per category)")
+    sep("Done")
 
-    # ── Loading snippets ──────────────────────────────────────────────
-    sep("Ready-to-Use Loading Snippets")
-    p = str(base.resolve()).replace("\\", "/")
-
-    print("  ── PyTorch ───────────────────────────────────────────────")
-    print(f"""
-  from torchvision import datasets, transforms
-  from torch.utils.data import DataLoader, random_split
-
-  transform = transforms.Compose([
-      transforms.Grayscale(num_output_channels=3),
-      transforms.Resize((224, 224)),
-      transforms.ToTensor(),
-      transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-  ])
-
-  full_ds    = datasets.ImageFolder(r"{p}", transform=transform)
-  train_size = int(0.8 * len(full_ds))
-  val_size   = len(full_ds) - train_size
-  train_ds, val_ds = random_split(full_ds, [train_size, val_size])
-
-  train_loader = DataLoader(train_ds, batch_size=32, shuffle=True,  num_workers=4)
-  val_loader   = DataLoader(val_ds,   batch_size=32, shuffle=False, num_workers=4)
-  # full_ds.class_to_idx → maps folder name to class index
-""")
-
-    print("  ── Keras / TensorFlow ────────────────────────────────────")
-    print(f"""
-  from tensorflow.keras.utils import image_dataset_from_directory
-
-  train_ds = image_dataset_from_directory(
-      r"{p}",
-      validation_split=0.2,
-      subset="training",
-      seed=42,
-      image_size=(224, 224),
-      batch_size=32,
-      color_mode="grayscale",
-  )
-  val_ds = image_dataset_from_directory(
-      r"{p}",
-      validation_split=0.2,
-      subset="validation",
-      seed=42,
-      image_size=(224, 224),
-      batch_size=32,
-      color_mode="grayscale",
-  )
-""")
-
-    sep("Done ✓")
-
-# ─────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Verify cyclone image dataset.")
-    parser.add_argument("--dir", type=str, default="cyclone_dataset",
-                        help="Dataset root directory (default: ./cyclone_dataset)")
-    args = parser.parse_args()
-    verify(args.dir)
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--dir",     default="cyclone_data_clean/KEEP",
+                    help="Directory to verify (default: cyclone_data_clean/KEEP)")
+    ap.add_argument("--csv",     default=None,
+                    help="filter_report.csv path for filter stats (optional)")
+    ap.add_argument("--samples", type=int, default=8,
+                    help="Images per category in sample grid (default: 8)")
+    ap.add_argument("--seed",    type=int, default=42,
+                    help="Random seed for reproducible sampling")
+    args = ap.parse_args()
+
+    csv_path = Path(args.csv) if args.csv else None
+    if csv_path is None:
+        auto = Path(args.dir).parent / "filter_report.csv"
+        if auto.exists():
+            csv_path = auto
+            print(f"Auto-detected CSV: {auto}")
+
+    verify(args.dir, csv_path, args.samples, args.seed)
