@@ -155,7 +155,10 @@ def train_pytorch_model(model, train_loader, val_loader, device,
     for param in model.parameters():
         param.requires_grad = True
     if hasattr(model, 'set_grad_checkpointing'):
-        model.set_grad_checkpointing(True)
+        try:
+            model.set_grad_checkpointing(True)
+        except (AssertionError, NotImplementedError):
+            pass
     if phase2_batch_size is not None:
         p2_train_loader = DataLoader(train_loader.dataset, batch_size=phase2_batch_size,
                                      shuffle=True,  num_workers=4, pin_memory=True, persistent_workers=True)
