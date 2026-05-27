@@ -197,9 +197,12 @@ def get_pt_probs_preds(model, loader, device):
     return all_labels, all_preds, all_probs
 
 
-def get_backbone_state_dict(state_dict, head_prefix='head.'):
+_HEAD_PREFIXES = ('head.', 'fc.', 'classifier.')
+
+def get_backbone_state_dict(state_dict):
     """Strip classifier head keys — lets cyclone backbone transfer into a fresh model."""
-    return {k: v for k, v in state_dict.items() if not k.startswith(head_prefix)}
+    return {k: v for k, v in state_dict.items()
+            if not any(k.startswith(p) for p in _HEAD_PREFIXES)}
 
 
 def evaluate_pytorch_model(model, val_loader, class_names, device):
