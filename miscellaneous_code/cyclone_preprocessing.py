@@ -194,11 +194,22 @@ def build_grid_masks(src_dir, thresh_sigma=0.7, max_line_width=8,
         clean reference pixel, preventing adjacent spans from using each
         other as interpolation anchors.
 
+    Coastlines:
+        Grid seam pixels are linearly interpolated out of the mean image first
+        so their edges don't contaminate coast detection.  Sobel gradient
+        magnitude is then computed on the smoothed, grid-suppressed mean; only
+        edges whose angle is NOT near-horizontal and NOT near-vertical are kept
+        (those diagonal/curved edges are geographic coastlines — axis-aligned
+        ones are grid-line remnants).  A morphological close (5×5) connects
+        broken segments before dilation (5×5 ellipse + 3×3 rect × 2 iter).
+        Stored in coast_mask; applied via TELEA inpainting in apply_grid_mask.
+
     Args:
         src_dir:         Root directory: src_dir/<class>/<image files>.
         thresh_sigma:    Threshold multiplier on high-pass residual std.
         max_line_width:  Max run length (px) counted as a grid seam.
-        coast_sigma:     (Phase 1: unused) Coastline gradient threshold.
+        coast_sigma:     Gradient-magnitude threshold multiplier for coastlines.
+                         Raised by +1 for groups with < 10 images.
         merge_tolerance: Max per-axis px difference to merge size variants.
         edge_margin:     Grid detections within this many px of border discarded.
 
@@ -265,14 +276,54 @@ def build_grid_masks(src_dir, thresh_sigma=0.7, max_line_width=8,
         grid_cols = _flag_ranges(mean_img.mean(axis=0), cw,
                                  thresh_sigma, max_line_width, edge_margin)
 
-        # Pass 2 — coastline detection: DISABLED for Phase 1.
-        coast_mask = np.zeros((ch, cw), dtype=np.uint8)
+        # Pass 2 — coastlines: gradient edges on grid-suppressed mean,
+        # with axis-aligned edges removed (those are grid-line remnants).
+        mean_for_coast = mean_img.copy()
+        for s, e in grid_rows:
+            span  = e - s
+            above = max(s - 1, 0)
+            below = min(e, ch - 1)
+            for i in range(span):
+                t = (i + 1) / (span + 1)
+                mean_for_coast[s + i, :] = (1.0 - t) * mean_for_coast[above, :] + t * mean_for_coast[below, :]
+        for s, e in grid_cols:
+            span  = e - s
+            left  = max(s - 1, 0)
+            right = min(e, cw - 1)
+            for i in range(span):
+                t = (i + 1) / (span + 1)
+                mean_for_coast[:, s + i] = (1.0 - t) * mean_for_coast[:, left] + t * mean_for_coast[:, right]
 
-        visual = _make_grid_mask(grid_rows, grid_cols, ch, cw)
+        blurred_c  = cv2.GaussianBlur(mean_for_coast, (5, 5), 1.5)
+        gx         = cv2.Sobel(blurred_c, cv2.CV_32F, 1, 0, ksize=3)
+        gy         = cv2.Sobel(blurred_c, cv2.CV_32F, 0, 1, ksize=3)
+        mag        = np.sqrt(gx**2 + gy**2)
+        ang        = np.arctan2(np.abs(gy), np.abs(gx))  # 0=horiz, π/2=vert
+
+        eff_sigma  = coast_sigma + 1.0 if n < 10 else coast_sigma
+        mag_thresh = mag.mean() + eff_sigma * mag.std()
+        axis_mrg   = np.deg2rad(20)
+        non_axis   = (ang > axis_mrg) & (ang < (np.pi / 2 - axis_mrg))
+        coast_bin  = ((mag > mag_thresh) & non_axis).astype(np.uint8) * 255
+
+        close_k    = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        coast_mask = cv2.morphologyEx(coast_bin, cv2.MORPH_CLOSE, close_k)
+        coast_mask = cv2.dilate(
+            coast_mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+        coast_mask = cv2.dilate(
+            coast_mask, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
+            iterations=2)
+
+        visual = coast_mask.copy()
+        for s, e in grid_rows:
+            visual[s:e, :] = 255
+        for s, e in grid_cols:
+            visual[:, s:e] = 255
 
         pct  = 100 * (visual > 0).mean()
         note = ' (small group — less reliable mean)' if n < 10 else ''
         print(f'  {cw}x{ch} ({n} imgs): {pct:.1f}% masked  '
+              f'coast_grad_thresh={mag_thresh:.1f}  '
               f'grid rows={len(grid_rows)} cols={len(grid_cols)}{note}')
 
         masks[(ch, cw)]   = {'grid_rows': grid_rows, 'grid_cols': grid_cols,
