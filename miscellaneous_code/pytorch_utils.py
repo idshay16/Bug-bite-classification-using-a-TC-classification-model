@@ -61,7 +61,7 @@ def get_pytorch_loaders(train_dir, val_dir, img_size=310, batch_size=4, augment=
 def train_pytorch_model(model, train_loader, val_loader, device,
                         phase1_epochs=5, phase2_epochs=20, patience=5, save_path=None,
                         phase1_batch_size=None, phase2_batch_size=None, label_smoothing=0.0,
-                        auto_class_weights=False):
+                        auto_class_weights=False, phase1_lr=1e-4, phase2_lr=5e-6):
     torch.cuda.empty_cache()
     model = model.to(device)
     if auto_class_weights:
@@ -124,7 +124,7 @@ def train_pytorch_model(model, train_loader, val_loader, device,
         param.requires_grad = False
     for param in model.get_classifier().parameters():
         param.requires_grad = True
-    optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-4, weight_decay=1e-2)
+    optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=phase1_lr, weight_decay=1e-2)
     def run_phase(n_epochs, optimizer, phase_name, t_loader, v_loader):
         nonlocal best_val_loss, patience_ctr, best_state
         print(f'{phase_name}')
@@ -175,7 +175,7 @@ def train_pytorch_model(model, train_loader, val_loader, device,
                                      shuffle=False, num_workers=4, pin_memory=True, persistent_workers=True)
     else:
         p2_train_loader, p2_val_loader = train_loader, val_loader
-    optimizer = optim.AdamW(model.parameters(), lr=5e-6, weight_decay=1e-2)
+    optimizer = optim.AdamW(model.parameters(), lr=phase2_lr, weight_decay=1e-2)
     # Reset patience and best_val_loss independently per phase — phase 2 unfreezes the backbone
     # so initial loss often rises above the phase 1 best, which would immediately drain patience.
     patience_ctr, best_val_loss = 0, float('inf')

@@ -13,6 +13,9 @@ cyclone_data_split
 # Model Weights (not uploaded due to repo storage limits)
 model_weights
 
+# Experiment runner checkpoints (large .pt files)
+results/checkpoints/
+
 # YOLO Model base weights and util scripts cache
 yolov3/__pycache__
 yolo_runs
