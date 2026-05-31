@@ -4,16 +4,16 @@
       "id": 0,
       "seed": 0,
       "label_smoothing": 0.0,
-      "phase2_lr": 5e-06,
+      "phase2_lr": 1e-06,
       "status": "completed",
-      "completed_at": "2026-05-31T18:12:51.492925+00:00",
-      "elapsed_h": 1.65
+      "completed_at": "2026-05-31T20:32:11.087528+00:00",
+      "elapsed_h": 1.71
     },
     {
       "id": 1,
       "seed": 0,
       "label_smoothing": 0.0,
-      "phase2_lr": 1e-05,
+      "phase2_lr": 5e-06,
       "status": "running",
       "completed_at": null,
       "elapsed_h": null
@@ -21,8 +21,8 @@
     {
       "id": 2,
       "seed": 0,
-      "label_smoothing": 0.1,
-      "phase2_lr": 5e-06,
+      "label_smoothing": 0.0,
+      "phase2_lr": 1e-05,
       "status": "pending",
       "completed_at": null,
       "elapsed_h": null
@@ -31,7 +31,7 @@
       "id": 3,
       "seed": 0,
       "label_smoothing": 0.1,
-      "phase2_lr": 1e-05,
+      "phase2_lr": 1e-06,
       "status": "pending",
       "completed_at": null,
       "elapsed_h": null
@@ -39,7 +39,7 @@
     {
       "id": 4,
       "seed": 0,
-      "label_smoothing": 0.2,
+      "label_smoothing": 0.1,
       "phase2_lr": 5e-06,
       "status": "pending",
       "completed_at": null,
@@ -48,7 +48,7 @@
     {
       "id": 5,
       "seed": 0,
-      "label_smoothing": 0.2,
+      "label_smoothing": 0.1,
       "phase2_lr": 1e-05,
       "status": "pending",
       "completed_at": null,
@@ -56,27 +56,27 @@
     },
     {
       "id": 6,
-      "seed": 1,
-      "label_smoothing": 0.0,
-      "phase2_lr": 5e-06,
+      "seed": 0,
+      "label_smoothing": 0.2,
+      "phase2_lr": 1e-06,
       "status": "pending",
       "completed_at": null,
       "elapsed_h": null
     },
     {
       "id": 7,
-      "seed": 1,
-      "label_smoothing": 0.0,
-      "phase2_lr": 1e-05,
+      "seed": 0,
+      "label_smoothing": 0.2,
+      "phase2_lr": 5e-06,
       "status": "pending",
       "completed_at": null,
       "elapsed_h": null
     },
     {
       "id": 8,
-      "seed": 1,
-      "label_smoothing": 0.1,
-      "phase2_lr": 5e-06,
+      "seed": 0,
+      "label_smoothing": 0.2,
+      "phase2_lr": 1e-05,
       "status": "pending",
       "completed_at": null,
       "elapsed_h": null
@@ -84,8 +84,8 @@
     {
       "id": 9,
       "seed": 1,
-      "label_smoothing": 0.1,
-      "phase2_lr": 1e-05,
+      "label_smoothing": 0.0,
+      "phase2_lr": 1e-06,
       "status": "pending",
       "completed_at": null,
       "elapsed_h": null
@@ -93,7 +93,7 @@
     {
       "id": 10,
       "seed": 1,
-      "label_smoothing": 0.2,
+      "label_smoothing": 0.0,
       "phase2_lr": 5e-06,
       "status": "pending",
       "completed_at": null,
@@ -102,7 +102,7 @@
     {
       "id": 11,
       "seed": 1,
-      "label_smoothing": 0.2,
+      "label_smoothing": 0.0,
       "phase2_lr": 1e-05,
       "status": "pending",
       "completed_at": null,
@@ -110,25 +110,16 @@
     },
     {
       "id": 12,
-      "seed": 2,
-      "label_smoothing": 0.0,
-      "phase2_lr": 5e-06,
+      "seed": 1,
+      "label_smoothing": 0.1,
+      "phase2_lr": 1e-06,
       "status": "pending",
       "completed_at": null,
       "elapsed_h": null
     },
     {
       "id": 13,
-      "seed": 2,
-      "label_smoothing": 0.0,
-      "phase2_lr": 1e-05,
-      "status": "pending",
-      "completed_at": null,
-      "elapsed_h": null
-    },
-    {
-      "id": 14,
-      "seed": 2,
+      "seed": 1,
       "label_smoothing": 0.1,
       "phase2_lr": 5e-06,
       "status": "pending",
@@ -136,8 +127,8 @@
       "elapsed_h": null
     },
     {
-      "id": 15,
-      "seed": 2,
+      "id": 14,
+      "seed": 1,
       "label_smoothing": 0.1,
       "phase2_lr": 1e-05,
       "status": "pending",
@@ -145,8 +136,17 @@
       "elapsed_h": null
     },
     {
+      "id": 15,
+      "seed": 1,
+      "label_smoothing": 0.2,
+      "phase2_lr": 1e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
       "id": 16,
-      "seed": 2,
+      "seed": 1,
       "label_smoothing": 0.2,
       "phase2_lr": 5e-06,
       "status": "pending",
@@ -155,7 +155,7 @@
     },
     {
       "id": 17,
-      "seed": 2,
+      "seed": 1,
       "label_smoothing": 0.2,
       "phase2_lr": 1e-05,
       "status": "pending",
@@ -164,16 +164,25 @@
     },
     {
       "id": 18,
-      "seed": 3,
+      "seed": 2,
       "label_smoothing": 0.0,
-      "phase2_lr": 5e-06,
+      "phase2_lr": 1e-06,
       "status": "pending",
       "completed_at": null,
       "elapsed_h": null
     },
     {
       "id": 19,
-      "seed": 3,
+      "seed": 2,
+      "label_smoothing": 0.0,
+      "phase2_lr": 5e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 20,
+      "seed": 2,
       "label_smoothing": 0.0,
       "phase2_lr": 1e-05,
       "status": "pending",
@@ -181,27 +190,18 @@
       "elapsed_h": null
     },
     {
-      "id": 20,
-      "seed": 3,
-      "label_smoothing": 0.1,
-      "phase2_lr": 5e-06,
-      "status": "pending",
-      "completed_at": null,
-      "elapsed_h": null
-    },
-    {
       "id": 21,
-      "seed": 3,
+      "seed": 2,
       "label_smoothing": 0.1,
-      "phase2_lr": 1e-05,
+      "phase2_lr": 1e-06,
       "status": "pending",
       "completed_at": null,
       "elapsed_h": null
     },
     {
       "id": 22,
-      "seed": 3,
-      "label_smoothing": 0.2,
+      "seed": 2,
+      "label_smoothing": 0.1,
       "phase2_lr": 5e-06,
       "status": "pending",
       "completed_at": null,
@@ -209,6 +209,114 @@
     },
     {
       "id": 23,
+      "seed": 2,
+      "label_smoothing": 0.1,
+      "phase2_lr": 1e-05,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 24,
+      "seed": 2,
+      "label_smoothing": 0.2,
+      "phase2_lr": 1e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 25,
+      "seed": 2,
+      "label_smoothing": 0.2,
+      "phase2_lr": 5e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 26,
+      "seed": 2,
+      "label_smoothing": 0.2,
+      "phase2_lr": 1e-05,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 27,
+      "seed": 3,
+      "label_smoothing": 0.0,
+      "phase2_lr": 1e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 28,
+      "seed": 3,
+      "label_smoothing": 0.0,
+      "phase2_lr": 5e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 29,
+      "seed": 3,
+      "label_smoothing": 0.0,
+      "phase2_lr": 1e-05,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 30,
+      "seed": 3,
+      "label_smoothing": 0.1,
+      "phase2_lr": 1e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 31,
+      "seed": 3,
+      "label_smoothing": 0.1,
+      "phase2_lr": 5e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 32,
+      "seed": 3,
+      "label_smoothing": 0.1,
+      "phase2_lr": 1e-05,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 33,
+      "seed": 3,
+      "label_smoothing": 0.2,
+      "phase2_lr": 1e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 34,
+      "seed": 3,
+      "label_smoothing": 0.2,
+      "phase2_lr": 5e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 35,
       "seed": 3,
       "label_smoothing": 0.2,
       "phase2_lr": 1e-05,
@@ -217,7 +325,16 @@
       "elapsed_h": null
     },
     {
-      "id": 24,
+      "id": 36,
+      "seed": 4,
+      "label_smoothing": 0.0,
+      "phase2_lr": 1e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 37,
       "seed": 4,
       "label_smoothing": 0.0,
       "phase2_lr": 5e-06,
@@ -226,7 +343,7 @@
       "elapsed_h": null
     },
     {
-      "id": 25,
+      "id": 38,
       "seed": 4,
       "label_smoothing": 0.0,
       "phase2_lr": 1e-05,
@@ -235,7 +352,16 @@
       "elapsed_h": null
     },
     {
-      "id": 26,
+      "id": 39,
+      "seed": 4,
+      "label_smoothing": 0.1,
+      "phase2_lr": 1e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 40,
       "seed": 4,
       "label_smoothing": 0.1,
       "phase2_lr": 5e-06,
@@ -244,7 +370,7 @@
       "elapsed_h": null
     },
     {
-      "id": 27,
+      "id": 41,
       "seed": 4,
       "label_smoothing": 0.1,
       "phase2_lr": 1e-05,
@@ -253,7 +379,16 @@
       "elapsed_h": null
     },
     {
-      "id": 28,
+      "id": 42,
+      "seed": 4,
+      "label_smoothing": 0.2,
+      "phase2_lr": 1e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 43,
       "seed": 4,
       "label_smoothing": 0.2,
       "phase2_lr": 5e-06,
@@ -262,8 +397,170 @@
       "elapsed_h": null
     },
     {
-      "id": 29,
+      "id": 44,
       "seed": 4,
+      "label_smoothing": 0.2,
+      "phase2_lr": 1e-05,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 45,
+      "seed": 5,
+      "label_smoothing": 0.0,
+      "phase2_lr": 1e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 46,
+      "seed": 5,
+      "label_smoothing": 0.0,
+      "phase2_lr": 5e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 47,
+      "seed": 5,
+      "label_smoothing": 0.0,
+      "phase2_lr": 1e-05,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 48,
+      "seed": 5,
+      "label_smoothing": 0.1,
+      "phase2_lr": 1e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 49,
+      "seed": 5,
+      "label_smoothing": 0.1,
+      "phase2_lr": 5e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 50,
+      "seed": 5,
+      "label_smoothing": 0.1,
+      "phase2_lr": 1e-05,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 51,
+      "seed": 5,
+      "label_smoothing": 0.2,
+      "phase2_lr": 1e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 52,
+      "seed": 5,
+      "label_smoothing": 0.2,
+      "phase2_lr": 5e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 53,
+      "seed": 5,
+      "label_smoothing": 0.2,
+      "phase2_lr": 1e-05,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 54,
+      "seed": 6,
+      "label_smoothing": 0.0,
+      "phase2_lr": 1e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 55,
+      "seed": 6,
+      "label_smoothing": 0.0,
+      "phase2_lr": 5e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 56,
+      "seed": 6,
+      "label_smoothing": 0.0,
+      "phase2_lr": 1e-05,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 57,
+      "seed": 6,
+      "label_smoothing": 0.1,
+      "phase2_lr": 1e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 58,
+      "seed": 6,
+      "label_smoothing": 0.1,
+      "phase2_lr": 5e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 59,
+      "seed": 6,
+      "label_smoothing": 0.1,
+      "phase2_lr": 1e-05,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 60,
+      "seed": 6,
+      "label_smoothing": 0.2,
+      "phase2_lr": 1e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 61,
+      "seed": 6,
+      "label_smoothing": 0.2,
+      "phase2_lr": 5e-06,
+      "status": "pending",
+      "completed_at": null,
+      "elapsed_h": null
+    },
+    {
+      "id": 62,
+      "seed": 6,
       "label_smoothing": 0.2,
       "phase2_lr": 1e-05,
       "status": "pending",

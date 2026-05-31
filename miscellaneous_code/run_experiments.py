@@ -66,8 +66,8 @@ PAUSE_FILE   = RESULTS_DIR / 'PAUSE'
 # These params control CYCLONE PRE-TRAINING only.
 # Bug-bite fine-tuning always uses BUG_LABEL_SMOOTHING / BUG_PHASE2_LR below.
 LABEL_SMOOTHING_VALUES = [0.0, 0.1, 0.2]
-PHASE2_LR_VALUES       = [5e-6, 1e-5]
-N_SEEDS                = 5
+PHASE2_LR_VALUES       = [1e-6, 5e-6, 1e-5]
+N_SEEDS                = 7
 
 # Fixed bug-bite fine-tuning params
 BUG_LABEL_SMOOTHING = 0.0
@@ -202,6 +202,45 @@ def append_result(result: dict):
                if (r['config_id'], r['model'], r['type']) != key]
     results.append(result)
     _atomic_write(RESULTS_FILE, results)
+
+# ── run id ───────────────────────────────────────────────────────────────────
+def make_run_id(cfg: dict) -> str:
+    return f's{cfg["seed"]}_ls{cfg["label_smoothing"]:.2f}_lr{cfg["phase2_lr"]:.1e}'
+
+# ── post-training evaluation scripts ─────────────────────────────────────────
+def run_eval_and_xai(cfg: dict):
+    import subprocess
+    run_id   = make_run_id(cfg)
+    cfg_id   = cfg['id']
+    seed     = cfg['seed']
+    scripts  = REPO_ROOT / 'scripts'
+
+    base = [
+        '--run-id',         run_id,
+        '--ctrl-convnext',  str(ctrl_ckpt_path(seed, 'convnext')),
+        '--ctrl-densenet',  str(ctrl_ckpt_path(seed, 'densenet')),
+        '--ctrl-inception', str(ctrl_ckpt_path(seed, 'inception')),
+        '--tc-convnext',    str(tc_ckpt_path(cfg_id, 'convnext')),
+        '--tc-densenet',    str(tc_ckpt_path(cfg_id, 'densenet')),
+        '--tc-inception',   str(tc_ckpt_path(cfg_id, 'inception')),
+    ]
+    cyc_args = [
+        '--cyc-convnext',   str(cyc_ckpt_path(cfg_id, 'convnext')),
+        '--cyc-densenet',   str(cyc_ckpt_path(cfg_id, 'densenet')),
+        '--cyc-inception',  str(cyc_ckpt_path(cfg_id, 'inception')),
+    ]
+
+    for script, extra in [
+        ('03_evaluate.py', cyc_args),
+        ('04_xai.py',      []),
+    ]:
+        print(f'[runner] running {script} for {run_id}')
+        result = subprocess.run(
+            [sys.executable, str(scripts / script)] + base + extra,
+            check=False,
+        )
+        if result.returncode != 0:
+            print(f'[runner] WARNING: {script} exited with code {result.returncode}')
 
 # ── checkpoint path helpers ───────────────────────────────────────────────────
 def cyc_ckpt_path(cfg_id: int, model_key: str) -> Path:
@@ -368,8 +407,8 @@ def cmd_status():
     done    = [c for c in configs if c['status'] == 'completed']
     pending = [c for c in configs if c['status'] != 'completed']
     print(f'Configs: {len(configs)} total | {len(done)} completed | {len(pending)} pending')
-    remaining_h_lo = len(pending) * 4.0
-    remaining_h_hi = len(pending) * 5.0
+    remaining_h_lo = len(pending) * 1.5
+    remaining_h_hi = len(pending) * 2.0
     print(f'Estimated remaining: {remaining_h_lo:.0f}–{remaining_h_hi:.0f}h')
 
     results = load_json(RESULTS_FILE, [])
@@ -443,10 +482,11 @@ def cmd_run(device: torch.device):
 
         elapsed = (time.time() - t0) / 3600
         if completed:
+            run_eval_and_xai(cfg)
             cfg['status'] = 'completed'
             cfg['completed_at'] = now_iso()
-            cfg['elapsed_h']    = round(elapsed, 2)
-            print(f'\n[runner] Config {cfg["id"]} done in {elapsed:.2f}h')
+            cfg['elapsed_h']    = round((time.time() - t0) / 3600, 2)
+            print(f'\n[runner] Config {cfg["id"]} done in {cfg["elapsed_h"]:.2f}h')
         else:
             # Paused mid-config — leave as pending so it resumes from checkpoints
             cfg['status'] = 'pending'
