@@ -22,3 +22,7 @@ Validation_results
 # Python cache files
 miscellaneous_code\__pycache__
 __pycache__
+
+# Recap files for team syncing
+CHANGES_RECAP_21_05_26.md
+CHANGES_RECAP_11_05_26.md
