@@ -14,13 +14,7 @@ cyclone_data_split
 model_weights
 
 # Experiment runner checkpoints (large .pt files)
-results/
-
-# YOLO Model base weights and util scripts cache
-yolov3/__pycache__
-yolo_runs
-yolo26n.pt
-yolo26x.pt
+/results
 
 # Misc Validation runs logging
 Validation_results
