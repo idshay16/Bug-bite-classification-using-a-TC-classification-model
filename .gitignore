@@ -15,6 +15,7 @@ model_weights
 
 # Experiment runner checkpoints (large .pt files)
 /results
+/project_book_results
 
 # Misc Validation runs logging
 Validation_results
