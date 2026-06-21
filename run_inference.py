@@ -127,15 +127,17 @@ def gradcam(model, img_tensor, target_layer):
 
     act, grad = act[0], grad[0]
     cam    = F.relu((act * grad.mean(dim=(1, 2))[:, None, None]).sum(0))
+    # smooth before upsampling to reduce high-freq noise
+    cam_s  = F.avg_pool2d(cam.float()[None, None], kernel_size=3, stride=1, padding=1).squeeze()
     H, W   = img_tensor.shape[-2], img_tensor.shape[-1]
-    cam_up = F.interpolate(cam.float()[None, None], size=(H, W),
+    cam_up = F.interpolate(cam_s[None, None], size=(H, W),
                            mode='bilinear', align_corners=False).squeeze().cpu().numpy()
     cam_up -= cam_up.min()
     cam_up /= cam_up.max() + 1e-8
     return cam_up
 
 
-def overlay(img_np, cam, alpha=0.45):
+def overlay(img_np, cam, alpha=0.30):
     hm = cv2.cvtColor(cv2.applyColorMap(np.uint8(255 * cam), cv2.COLORMAP_JET),
                       cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
     return np.clip((1 - alpha) * img_np.astype(np.float32) / 255.0 + alpha * hm, 0, 1)
@@ -182,7 +184,7 @@ def lime_explain(img_np, models, device, n_samples):
     heatmap  = np.zeros(segments.shape, dtype=np.float32)
     for seg_id, w in weights.items():
         heatmap[segments == seg_id] = w
-    return heatmap, segments
+    return exp, heatmap, segments
 
 
 def show(img_np, ctrl_label, ctrl_probs, tc_label, tc_probs,
@@ -235,21 +237,38 @@ def show(img_np, ctrl_label, ctrl_probs, tc_label, tc_probs,
     # ── LIME row ──────────────────────────────────────────────────────────────
     if has_lime:
         import skimage.segmentation
+        from matplotlib.patches import Patch
+        r     = 2 + len(arch_keys)
+        TOP_N = 12  # only show top N segments by |weight|
+
         import matplotlib.cm as _cm
-        ctrl_hm, ctrl_segs = ctrl_lime
-        tc_hm,   tc_segs   = tc_lime
-        r    = 2 + len(arch_keys)
-        vmax = max(abs(ctrl_hm).max(), abs(tc_hm).max()) + 1e-8
+        ctrl_exp_obj, ctrl_hm, ctrl_segs = ctrl_lime
+        tc_exp_obj,   tc_hm,   tc_segs   = tc_lime
         for col, (hm, segs, title) in enumerate([
             (ctrl_hm, ctrl_segs, f'LIME — Control  →  {ctrl_label}'),
             (tc_hm,   tc_segs,   f'LIME — TC  →  {tc_label}'),
         ]):
-            norm    = (hm + vmax) / (2 * vmax)            # [0,1], 0.5=neutral
-            colored = _cm.RdBu_r(norm)[:, :, :3]          # RGB
-            blended = np.clip(0.5 * img_np.astype(np.float32)/255.0 + 0.5 * colored, 0, 1)
-            vis     = skimage.segmentation.mark_boundaries(blended, segs, color=(1,1,0), mode='outer')
+            seg_ids = np.unique(segs)
+            seg_w   = {s: float(hm[segs == s].mean()) for s in seg_ids}
+            top_ids = sorted(seg_w, key=lambda s: abs(seg_w[s]), reverse=True)[:TOP_N]
+            vmax    = max(abs(seg_w[s]) for s in top_ids) + 1e-8
+            img_f   = img_np.astype(np.float32) / 255.0
+            colored = img_f.copy()
+            for s in top_ids:
+                mask = segs == s
+                norm = (np.clip(seg_w[s], -vmax, vmax) + vmax) / (2 * vmax)
+                tint = np.array(_cm.RdBu_r(norm)[:3], dtype=np.float32)
+                colored[mask] = np.clip(0.60 * img_f[mask] + 0.40 * tint, 0, 1)
+            top_mask = np.isin(segs, top_ids).astype(int)
+            vis = skimage.segmentation.mark_boundaries(
+                colored, top_mask, color=(1, 1, 0), mode='outer')
             ax = fig.add_subplot(gs[r, col])
             ax.imshow(vis); ax.axis('off'); ax.set_title(title, fontweight='bold')
+            legend = [Patch(facecolor='#d73027', label='Supports prediction'),
+                      Patch(facecolor='#4575b4', label='Contradicts prediction'),
+                      Patch(facecolor='yellow',  label='Segment boundary')]
+            ax.legend(handles=legend, loc='lower left', fontsize=7,
+                      framealpha=0.8, handlelength=1.2)
 
     out_path = ROOT / 'inference_result.png'
     plt.savefig(out_path, dpi=150, bbox_inches='tight')
@@ -291,9 +310,11 @@ def main():
     if not args.no_lime:
         try:
             print('LIME — Control:')
-            ctrl_lime = lime_explain(img_np, ctrl_models, device, args.lime_samples)
+            ctrl_exp_obj, ctrl_hm, ctrl_segs = lime_explain(img_np, ctrl_models, device, args.lime_samples)
+            ctrl_lime = (ctrl_exp_obj, ctrl_hm, ctrl_segs)
             print('LIME — TC:')
-            tc_lime   = lime_explain(img_np, tc_models,   device, args.lime_samples)
+            tc_exp_obj, tc_hm, tc_segs = lime_explain(img_np, tc_models, device, args.lime_samples)
+            tc_lime = (tc_exp_obj, tc_hm, tc_segs)
         except ImportError:
             print('LIME skipped — pip install lime scikit-image')
 
