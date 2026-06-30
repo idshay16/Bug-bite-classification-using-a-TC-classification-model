@@ -40,318 +40,164 @@
 \section{Maintainer's Guide}
 \label{app:maintainer-guide}
 
-This appendix is addressed to the person responsible for keeping this system
-operational over time. No prior knowledge of machine learning is assumed.
-The minimum required computing resource is a free Google Colab account for
-running inference. Retraining the models requires dedicated GPU hardware;
-the compute requirements for that case are described separately in
-Section~\ref{sec:mg-retrain}.
+This guide is addressed to a software engineer or researcher responsible for
+keeping this system operational, extending the research, or advancing the
+prototype toward a deployable product. It covers the operating environment,
+installation of all custom software, the training pipeline, and procedures
+for updating and extending the system.
 
 % ============================================================
-\subsection{What This System Does}
+\subsection{System Overview}
 \label{sec:mg-overview}
 % ============================================================
 
+\subsubsection{What the System Does}
+
 The system classifies a photograph of a bug bite into one of five categories:
-ant bite, bed bug bite, mosquito bite, spider bite, or tick/flea bite.
-It does this by running the photograph through an ensemble of three neural
-network models that were trained on labelled bug-bite images. The system also
-produces visual explanations showing which regions of the image most influenced
-the classification decision.
+ant bite, bed bug bite, mosquito bite, spider bite, or tick/flea bite. It does
+this by running the photograph through an ensemble of three neural network
+models and produces visual explanations showing which image regions most
+influenced the prediction.
 
-The inference interface is a single Jupyter notebook,
-\texttt{Stacked\_Model\_Colab.ipynb}, which is designed to run on Google Colab.
-No local installation is required.
+The inference interface is \texttt{Stacked\_Model\_Colab.ipynb}, a
+self-contained Jupyter notebook designed for Google Colab. The full training
+and evaluation pipeline runs via \texttt{miscellaneous\_code/run\_experiments.py}
+on a dedicated GPU machine.
 
-% ============================================================
-\subsection{Accessing Data and Model Weights}
-\label{sec:mg-data}
-% ============================================================
+\subsubsection{Research Context}
 
-The trained model weights are not stored directly in the repository because of
-their size. They must be obtained separately and placed in Google Drive before
-inference can be run.
-
-\subsubsection{Obtaining the Weights}
-
-Contact \textbf{ishay.yulzary@gmail.com} to request access to the weights
-archive. Two archives are available:
-
-\begin{itemize}
-    \item \texttt{project\_book\_results.tar} --- the selected best-performing
-          checkpoints used in the demo notebook (one Control config, one TC config,
-          three architectures each). This is sufficient for running inference.
-    \item \textbf{Complete sweep archive} --- all 70 experiment configurations
-          (63 TC hyperparameter configs $\times$ 7 seeds, plus 7 Control seeds),
-          covering every trained checkpoint from the published experiments.
-          Request this if you intend to reproduce the full evaluation or extend
-          the sweep.
-\end{itemize}
-
-For inference, place \texttt{project\_book\_results.tar} anywhere in your
-Google Drive, for example:
-
-\begin{lstlisting}
-MyDrive/Capstone/project_book_results.tar
-\end{lstlisting}
-
-The notebook extracts the archive automatically on first run. If you place
-the file in a different Drive location, you must update the
-\texttt{PROJECT\_ROOT} variable directly inside the corresponding cell in
-\texttt{Stacked\_Model\_Colab.ipynb} to match your chosen path. Changing
-it in a separate cell is not sufficient, as all subsequent cells reference
-the variable by name.
-
-\subsubsection{Obtaining the Datasets}
-
-Two datasets were used during training:
+Two training pipelines are compared across three backbone architectures,
+three label-smoothing values, three learning rates, and seven random seeds
+(63 configurations total):
 
 \begin{description}
-    \item[Bug-bite dataset] Included in the repository under
-          \texttt{Bug-Data/Multiclass\_Bug\_data/}. Contact
-          \texttt{ishay.yulzary@gmail.com} for the full curated version
-          used in training.
-
-    \item[Cyclone dataset] Required only if retraining from scratch.
-          It can be downloaded automatically using the provided fetch script
-          (see Section~\ref{sec:mg-retrain-data}), or obtained from the
-          authors via the contact address above.
+    \item[Control] ImageNet pre-training $\rightarrow$ bug-bite fine-tuning
+          (single-stage transfer).
+    \item[TC (Transfer Classification)] ImageNet pre-training $\rightarrow$
+          cyclone intensity pre-training $\rightarrow$ bug-bite fine-tuning
+          (two-stage transfer).
 \end{description}
 
-% ============================================================
-\subsection{Running Inference}
-\label{sec:mg-inference}
-% ============================================================
-
-Inference is performed through the notebook
-\texttt{Stacked\_Model\_Colab.ipynb} on Google Colab.
-Follow the steps below in order. Each step corresponds to a numbered cell
-group in the notebook.
-
-\subsubsection{Step 1: Open the Notebook in Colab}
-
-\begin{enumerate}
-    \item Go to \url{https://colab.research.google.com}.
-    \item Select \textbf{File} $\rightarrow$ \textbf{Open notebook}
-          $\rightarrow$ \textbf{GitHub}.
-    \item Paste the repository URL and select
-          \texttt{Stacked\_Model\_Colab.ipynb}.
-
-    \noindent Alternatively, upload the notebook file directly via
-    \textbf{File} $\rightarrow$ \textbf{Upload notebook}.
-\end{enumerate}
-
-\subsubsection{Step 2: Install Dependencies}
-
-Run \textbf{Section 1} of the notebook. This installs \texttt{p7zip-full},
-\texttt{timm}, and \texttt{lime}. This step takes approximately one minute
-and only needs to run once per Colab session.
-
-\subsubsection{Step 3: Mount Google Drive}
-
-Run \textbf{Section 2}. Colab will prompt you to authorise access to your
-Google account. After authorisation, verify that the output reads:
-
-\begin{lstlisting}
-PROJECT_ROOT exists: True
-Archive exists:      True
-\end{lstlisting}
-
-If either line reads \texttt{False}, see
-Section~\ref{sec:mg-troubleshoot} for remediation steps.
-
-\paragraph{Using a different Drive path.}
-The notebook defaults to \texttt{MyDrive/Capstone} as the project root.
-If your weights archive is stored at a different location, you must update
-the \texttt{PROJECT\_ROOT} variable directly in the notebook source before
-running Section 2. In Colab, open the cell containing:
-\begin{lstlisting}[language=Python]
-PROJECT_ROOT = '/content/drive/MyDrive/Capstone'
-\end{lstlisting}
-and change the path to match your Drive folder structure. This change must
-be made in the cell itself, not just in a separate cell, because other
-cells reference \texttt{PROJECT\_ROOT} by name.
-
-\subsubsection{Step 4: Extract Model Weights}
-
-Run \textbf{Section 3}. The notebook extracts \texttt{project\_book\_results.tar}
-into the Drive folder. On first run this takes 2--5 minutes depending on
-archive size. On subsequent runs the notebook detects the existing extraction
-and skips this step immediately.
-
-\subsubsection{Step 5: Load Models}
-
-Run \textbf{Section 4} (imports) and \textbf{Section 5} (model loading).
-Six models are loaded: three trained with the Control pipeline and three
-trained with the TC pipeline. Successful loading produces the output:
-
-\begin{lstlisting}
-All models loaded.
-\end{lstlisting}
-
-\subsubsection{Step 6: Run Inference on an Image}
-
-In \textbf{Section 7}, set the variable \texttt{IMG\_PATH} to the path of
-the image you wish to classify. The image must be accessible from within
-Colab, either via Google Drive or via a direct upload.
-
-\paragraph{Option A: Image on Google Drive.}
-Place the image in your Drive and set:
-\begin{lstlisting}[language=Python]
-IMG_PATH = '/content/drive/MyDrive/your_image.jpg'
-\end{lstlisting}
-
-\paragraph{Option B: Upload directly to Colab.}
-Uncomment the upload line in the cell:
-\begin{lstlisting}[language=Python]
-from google.colab import files
-up = files.upload()
-IMG_PATH = list(up.keys())[0]
-\end{lstlisting}
-
-Run the cell. The output displays:
-\begin{itemize}
-    \item The predicted bug-bite category for both the Control and TC models.
-    \item A probability bar chart for each of the five classes, for both
-          pipelines side by side.
-\end{itemize}
-
-\subsubsection{Step 7: Generate Visual Explanations (Optional)}
-
-\begin{description}
-    \item[GradCAM (Section 8):] Highlights the image regions that most
-          influenced the model's decision. Produces a $3 \times 2$ grid:
-          one row per architecture (ConvNeXt-Tiny, DenseNet-121, InceptionV3),
-          one column per pipeline (Control and TC).
-
-    \item[LIME (Section 9):] Highlights image superpixels by their
-          contribution to the prediction. Red regions support the predicted
-          class; blue regions contradict it. This step takes approximately
-          2--5 minutes on CPU.
-\end{description}
-
-% ============================================================
-\subsection{Retraining the Models}
-\label{sec:mg-retrain}
-% ============================================================
-
-Retraining is only necessary when the dataset changes substantially, for
-example when new bug-bite categories are added or when the existing labelled
-data is significantly expanded. It is not required for routine operation.
-
-\subsubsection{Hardware Requirements}
-
-\textbf{A dedicated GPU is required for retraining.} The full training sweep
-was completed on the following hardware:
-
-\begin{itemize}
-    \item \textbf{CPU:} Intel Core i7-9700KF @ 5.10\,GHz all-core OC (8 cores / 8 threads)
-    \item \textbf{RAM:} 32\,GB
-    \item \textbf{GPU:} NVIDIA RTX A5000 (24\,GB GDDR6 VRAM)
-\end{itemize}
-
-The full 63-configuration sweep took approximately 100--130 hours of continuous
-GPU time on this system. Google Colab free tier is not suitable for the full
-sweep due to session time limits; a Colab Pro instance with a high-RAM GPU
-runtime is the minimum viable option for partial retraining.
-
-If only a single configuration needs to be retrained, the estimated runtime is
-1.5--2 hours on the reference hardware above. The default batch size of 4
-allows training to run on GPUs with as little as 8\,GB VRAM, though InceptionV3
-phase-1 training may require reducing the batch size further on GPUs below
-24\,GB VRAM.
-
-\subsubsection{Preparing the Cyclone Dataset}
-\label{sec:mg-retrain-data}
-
-The cyclone dataset is required for the TC pre-training stage. It can be
-downloaded automatically from NOAA public servers using the provided script:
-
-\begin{lstlisting}[language=bash]
-# Full dataset: 4000 images per category (approximately 4 hours)
-python miscellaneous_code/fetch_cyclone_dataset.py
-
-# Quick test: 5 images per category
-python miscellaneous_code/fetch_cyclone_dataset.py --trial
-\end{lstlisting}
-
-The download is resumable. If interrupted, re-run the same command and it
-will continue from where it stopped. Total dataset size is approximately
-20,000 images across five intensity categories.
-
-Contact \texttt{ishay.yulzary@gmail.com} to request the pre-built dataset
-split if you wish to avoid running the download.
-
-\subsubsection{Configuring Dataset Paths}
-
-Before running training, update the dataset paths in
-\texttt{miscellaneous\_code/run\_experiments.py}:
-
-\begin{lstlisting}[language=Python]
-BUG_TRAIN = '/path/to/bug_data/train'
-BUG_VAL   = '/path/to/bug_data/val'
-TC_TRAIN  = '/path/to/cyclone_data_split/train'
-TC_VAL    = '/path/to/cyclone_data_split/val'
-\end{lstlisting}
-
-\subsubsection{Running the Training Sweep}
-
-\begin{lstlisting}[language=bash]
-# Start or resume the full hyperparameter sweep
-python miscellaneous_code/run_experiments.py
-
-# Check progress at any time
-python miscellaneous_code/run_experiments.py --status
-\end{lstlisting}
-
-\paragraph{Pausing and resuming.}
-The sweep can be safely interrupted at any time:
-\begin{itemize}
-    \item Press \textbf{Ctrl-C}, or create the file \texttt{results/PAUSE},
-          to stop the sweep after the current model finishes. All checkpoints
-          are preserved.
-    \item Re-run the same command to resume from where it stopped.
-    \item If the process was killed unexpectedly (crash or power loss),
-          re-running will automatically recover: partially-completed
-          configurations restart from their last saved checkpoint.
-\end{itemize}
-
-\paragraph{Updating the weights archive.}
-After retraining, the new weight files are located in
-\texttt{results/checkpoints/}. To make them available to the inference
-notebook, package the relevant checkpoint directories into a new
-\texttt{project\_book\_results.tar} archive and upload it to Google Drive,
-replacing the previous file.
-
-% ============================================================
-\subsection{Dependency Management}
-\label{sec:mg-deps}
-% ============================================================
-
-\subsubsection{Inference (Colab)}
-
-The inference notebook installs its own dependencies at runtime in Section 1.
-No manual installation is required. Core packages used:
+The core hypothesis is that intermediate pre-training on tropical cyclone
+satellite imagery provides a better feature prior for bug-bite classification
+than ImageNet pre-training alone, because cyclone images share structural
+visual properties (radial textures, soft gradients, fine-grained
+inter-category differences) with skin macro-photography.
 
 \begin{center}
-\begin{tabular}{ll}
+\begin{tabular}{lll}
 \toprule
-\textbf{Package} & \textbf{Purpose} \\
+\textbf{Architecture} & \textbf{timm identifier} & \textbf{Input size} \\
 \midrule
-\texttt{torch}, \texttt{torchvision} & Model inference \\
-\texttt{timm}                        & Pre-trained architecture loading \\
-\texttt{numpy}, \texttt{opencv-python} & Image processing \\
-\texttt{matplotlib}                  & Visualisation \\
-\texttt{lime}, \texttt{scikit-image} & LIME explanations \\
+ConvNeXt-Tiny  & \texttt{convnext\_tiny.fb\_in22k\_ft\_in1k} & 256$\times$256 \\
+DenseNet-121   & \texttt{densenet121.ra\_in1k}                & 256$\times$256 \\
+InceptionV3    & \texttt{inception\_v3.tv\_in1k}              & 299$\times$299 \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\subsubsection{Training (Local or Server)}
+% ============================================================
+\subsection{Repository Structure}
+\label{sec:mg-repo}
+% ============================================================
 
-For a local training environment, install dependencies with:
+\begin{description}
+    \item[\texttt{notebooks/Multiclass\_Classification.ipynb}]
+          Primary experimental notebook. Covers all four pipeline stages:
+          control training, TC pre-training, feature map and GradCAM
+          evaluation, and the full XAI suite. Intended for interactive
+          exploration or one-shot reproduction on a GPU instance.
+
+    \item[\texttt{Stacked\_Model\_Colab.ipynb}]
+          Self-contained inference and visualisation notebook for Google Colab
+          free tier. Loads trained weights from Google Drive, runs ensemble
+          inference on a single image, and produces side-by-side Control vs.\
+          TC GradCAM and LIME outputs.
+
+    \item[\texttt{scripts/}]
+          Standalone Python scripts, one per pipeline stage, designed for
+          unattended server execution via \texttt{run\_experiments.py}.
+          \begin{itemize}
+              \item \texttt{shared.py} --- shared imports, dataset paths,
+                    metrics helpers, and GradCAM utilities.
+              \item \texttt{01\_train\_control.py} --- trains the Control
+                    (ImageNet $\rightarrow$ bug-bite) models.
+              \item \texttt{02\_train\_tc.py} --- runs cyclone pre-training
+                    then TC $\rightarrow$ bug-bite fine-tuning.
+              \item \texttt{03\_evaluate.py} --- generates feature map
+                    comparisons and GradCAM overlays.
+              \item \texttt{04\_xai.py} --- computes ensemble metrics,
+                    silhouette scores, t-SNE projections, LIME, SHAP, and
+                    DiCE outputs.
+          \end{itemize}
+
+    \item[\texttt{miscellaneous\_code/pytorch\_utils.py}]
+          Custom PyTorch training library imported by all scripts and the
+          main notebook. See Section~\ref{sec:mg-pytorch-utils}.
+
+    \item[\texttt{miscellaneous\_code/run\_experiments.py}]
+          Automated hyperparameter sweep runner.
+          See Section~\ref{sec:mg-sweep}.
+
+    \item[\texttt{miscellaneous\_code/fetch\_cyclone\_dataset.py}]
+          Downloads and labels the HURSAT-B1 cyclone dataset from NOAA.
+          See Section~\ref{sec:mg-data-cyclone}.
+
+    \item[\texttt{miscellaneous\_code/cyclone\_preprocessing.py}]
+          Removes grid-line artefacts introduced by HURSAT-B1 image tiling
+          before training.
+
+    \item[\texttt{Bug-Data/Multiclass\_Bug\_data/}]
+          Bug-bite dataset: \texttt{train/\{class\}/} and
+          \texttt{val/\{class\}/} subdirectories, one per class.
+
+    \item[\texttt{results/}]
+          Auto-generated by the sweep runner. Contains checkpoints,
+          per-run metric JSONs, XAI outputs, and plots.
+
+    \item[\texttt{deploy/}]
+          Legacy Streamlit demo (binary classifier, outdated). Not part
+          of the active pipeline; retained for reference only.
+\end{description}
+
+% ============================================================
+\subsection{Operating Environment}
+\label{sec:mg-env}
+% ============================================================
+
+\subsubsection{Hardware Requirements}
+
+\textbf{A dedicated GPU is required for training.} The full 63-configuration
+sweep was run on the following hardware:
+
+\begin{itemize}
+    \item \textbf{CPU:} Intel Core i7-9700KF @ 5.10\,GHz all-core OC
+          (8 cores / 8 threads)
+    \item \textbf{RAM:} 32\,GB
+    \item \textbf{GPU:} NVIDIA RTX A5000 (24\,GB GDDR6 VRAM)
+\end{itemize}
+
+The full sweep took approximately 100--130 hours of continuous GPU time on
+this system. A GPU with at least 16\,GB VRAM is recommended; the default
+batch size of 4 allows training on GPUs with as little as 8\,GB VRAM at the
+cost of slower convergence. InceptionV3 phase-1 training may require a
+reduced batch size on GPUs below 24\,GB VRAM (see
+Section~\ref{sec:mg-troubleshoot-oom}).
+
+Google Colab free tier is not suitable for the full sweep due to session time
+limits. A Colab Pro instance with a high-RAM GPU runtime is the minimum viable
+option for partial retraining. Inference and XAI visualisation can be run on
+CPU or a smaller GPU.
+
+\subsubsection{Software Dependencies}
+
+\textbf{Inference (Colab):} The inference notebook installs its own
+dependencies at runtime in Section 1. No manual installation is required.
+
+\textbf{Training (local or server):}
 
 \begin{lstlisting}[language=bash]
+# Core training dependencies
 pip install torch torchvision timm numpy Pillow opencv-python \
             scikit-learn matplotlib tqdm
 
@@ -362,11 +208,440 @@ pip install shap lime scikit-image dice-ml
 pip install netCDF4 requests pandas tqdm
 \end{lstlisting}
 
-There is no \texttt{requirements.txt} pinning specific versions for the
-training environment. The project was developed and tested with
-PyTorch 2.x and timm 0.9.x. If you encounter compatibility errors,
-contact \texttt{ishay.yulzary@gmail.com} for the exact environment
-specification used during the experiments.
+There is no pinned \texttt{requirements.txt} for the training environment.
+The project was developed and tested with PyTorch 2.x and timm 0.9.x.
+Contact \texttt{ishay.yulzary@gmail.com} for the exact environment
+specification used during the published experiments.
+
+\subsubsection{Dataset Paths}
+
+Dataset paths are configured at the top of
+\texttt{miscellaneous\_code/run\_experiments.py} and in
+\texttt{scripts/shared.py}. They default to WSL native paths:
+
+\begin{lstlisting}[language=Python]
+BUG_TRAIN = '/home/test/bug_data/train'
+BUG_VAL   = '/home/test/bug_data/val'
+TC_TRAIN  = '/home/test/cyclone_data_split/train'
+TC_VAL    = '/home/test/cyclone_data_split/val'
+\end{lstlisting}
+
+Update these constants to match your environment before running training.
+
+% ============================================================
+\subsection{Custom Training Library: \texttt{pytorch\_utils.py}}
+\label{sec:mg-pytorch-utils}
+% ============================================================
+
+\texttt{miscellaneous\_code/pytorch\_utils.py} is the core custom software
+library of this project. It contains all reusable PyTorch infrastructure and
+is imported by \texttt{run\_experiments.py}, the four pipeline scripts in
+\texttt{scripts/}, and the main notebook. Any modifications to the training
+loop, data loading, or evaluation must be made here.
+
+\subsubsection{\texttt{get\_pytorch\_loaders}}
+
+\begin{lstlisting}[language=Python]
+get_pytorch_loaders(train_dir, val_dir,
+                    img_size=310, batch_size=4, augment=False)
+\end{lstlisting}
+
+Returns \texttt{(train\_loader, val\_loader, class\_names)} using
+\texttt{torchvision.datasets.ImageFolder}. The \texttt{augment} parameter
+accepts three values:
+
+\begin{description}
+    \item[\texttt{False}] No augmentation. Used for validation and bug-bite
+          fine-tuning.
+    \item[\texttt{True}] Light augmentation: horizontal flip,
+          $\pm10^{\circ}$ rotation.
+    \item[\texttt{'strong'}] Aggressive augmentation for cyclone satellite
+          imagery: random resized crop (scale 0.35--1.0), full $360^{\circ}$
+          rotation, vertical flip, colour jitter, random greyscale, Gaussian
+          blur (kernel 5, $\sigma \in [0.5, 3.0]$), and random erasing.
+          Full rotation and vertical flip are valid for cyclone images because
+          satellite imagery is radially symmetric with respect to the storm
+          centre.
+\end{description}
+
+All loaders use ImageNet normalisation
+(\texttt{mean=[0.485, 0.456, 0.406]}, \texttt{std=[0.229, 0.224, 0.225]}).
+
+\subsubsection{\texttt{train\_pytorch\_model}}
+
+\begin{lstlisting}[language=Python]
+train_pytorch_model(model, train_loader, val_loader, device,
+                    phase1_epochs=5, phase2_epochs=20, patience=5,
+                    save_path=None,
+                    phase1_batch_size=None, phase2_batch_size=None,
+                    label_smoothing=0.0, auto_class_weights=False,
+                    phase1_lr=1e-4, phase2_lr=5e-6)
+\end{lstlisting}
+
+Implements the two-phase fine-tuning strategy used throughout the project:
+
+\begin{description}
+    \item[Phase 1 (head-only)] All backbone parameters are frozen.
+          Only the classification head (detected via
+          \texttt{model.get\_classifier()}) is trained for
+          \texttt{phase1\_epochs} epochs at \texttt{phase1\_lr} with
+          AdamW ($\lambda = 0.01$).
+    \item[Phase 2 (full fine-tune)] All parameters are unfrozen and the
+          entire network is trained at \texttt{phase2\_lr}. Gradient
+          checkpointing is enabled where the model supports it.
+\end{description}
+
+Both phases use early stopping on validation loss (patience counter resets
+independently between phases), Automatic Mixed Precision (AMP) with
+\texttt{bfloat16} on CUDA, \texttt{CrossEntropyLoss} with optional label
+smoothing, and AdamW optimisation. The best checkpoint (lowest validation
+loss) is saved to \texttt{save\_path} and reloaded before the function
+returns.
+
+\subsubsection{\texttt{get\_backbone\_state\_dict}}
+
+\begin{lstlisting}[language=Python]
+get_backbone_state_dict(state_dict)
+\end{lstlisting}
+
+Strips all classifier head keys from a state dict, enabling backbone weight
+transfer between tasks with different numbers of output classes. Keys
+starting with \texttt{head.}, \texttt{fc.}, or \texttt{classifier.} are
+removed. This is the mechanism by which cyclone-pre-trained backbones are
+transplanted into fresh bug-bite classification heads.
+
+\subsubsection{Supporting Functions}
+
+\begin{description}
+    \item[\texttt{get\_pt\_probs\_preds(model, loader, device)}]
+          Returns \texttt{(true\_labels, argmax\_preds, softmax\_probs)}.
+          Used for evaluation after training.
+    \item[\texttt{evaluate\_pytorch\_model(model, val\_loader, class\_names,
+          device)}]
+          Prints a full \texttt{sklearn} classification report and renders
+          a confusion matrix.
+    \item[\texttt{plot\_pytorch\_history(history)}]
+          Renders train/validation accuracy and loss curves from the history
+          dict returned by \texttt{train\_pytorch\_model}.
+\end{description}
+
+% ============================================================
+\subsection{Dataset Acquisition}
+\label{sec:mg-data}
+% ============================================================
+
+\subsubsection{Bug-Bite Dataset}
+
+The bug-bite dataset contains images of five species categories:
+\texttt{ants}, \texttt{bed\_bugs}, \texttt{mosquitos}, \texttt{spiders},
+and \texttt{ticks\_fleas}, organised as
+\texttt{train/\{class\}/} and \texttt{val/\{class\}/} subdirectories
+inside \texttt{Bug-Data/Multiclass\_Bug\_data/}.
+
+The dataset is available via two channels:
+\begin{enumerate}
+    \item \textbf{Repository:} the \texttt{Bug-Data/} directory is included
+          and can be used directly.
+    \item \textbf{Curated archive:} a pre-processed version including
+          augmented samples used in the published experiments, available
+          on request from \texttt{ishay.yulzary@gmail.com}.
+\end{enumerate}
+
+\subsubsection{Cyclone Dataset}
+\label{sec:mg-data-cyclone}
+
+The cyclone dataset is derived from:
+\begin{itemize}
+    \item \textbf{HURSAT-B1}: infrared brightness temperature satellite
+          imagery at $8\,\text{km}$ resolution, hosted by NOAA.
+    \item \textbf{IBTrACS}: per-observation wind speed records used to
+          assign intensity labels.
+\end{itemize}
+
+Five intensity categories are defined on the Saffir-Simpson scale:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+\textbf{Category label} & \textbf{Wind speed (kt)} &
+\textbf{Saffir-Simpson equivalent} \\
+\midrule
+\texttt{cat1\_tropical\_depression} & 0--33   & Tropical Depression \\
+\texttt{cat2\_tropical\_storm}      & 34--63  & Tropical Storm \\
+\texttt{cat3\_hurricane\_cat12}     & 64--95  & Hurricane Cat 1--2 \\
+\texttt{cat4\_hurricane\_cat34}     & 96--136 & Hurricane Cat 3--4 \\
+\texttt{cat5\_hurricane\_cat5}      & 137+    & Hurricane Cat 5 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Images cover 1995--2016. Each frame is clipped to
+$[180, 300]\,\text{K}$ brightness temperature, inverted (cold cloud tops
+appear bright), and saved as a $224\times224$ PNG.
+
+\subsubsection*{Fetching the cyclone dataset}
+
+\begin{lstlisting}[language=bash]
+# Full dataset: 4000 images per category (20000 total, ~4h on a stable connection)
+python miscellaneous_code/fetch_cyclone_dataset.py
+
+# Quick trial run: 5 images per category
+python miscellaneous_code/fetch_cyclone_dataset.py --trial
+
+# Custom target size and worker count
+python miscellaneous_code/fetch_cyclone_dataset.py --target 2000 --workers 8
+\end{lstlisting}
+
+The script is resumable via \texttt{cyclone\_dataset/download\_log.json}.
+The pre-built train/val split (500 val images per category) is available
+from \texttt{ishay.yulzary@gmail.com}.
+
+% ============================================================
+\subsection{Training Pipeline}
+\label{sec:mg-pipeline}
+% ============================================================
+
+\subsubsection{Individual Scripts}
+
+The four scripts in \texttt{scripts/} mirror the four sections of the main
+notebook and are designed for unattended server execution.
+
+\textbf{\texttt{01\_train\_control.py}} trains the three Control models for
+one seed and saves checkpoint files at the paths supplied via CLI:
+
+\begin{lstlisting}[language=bash]
+python scripts/01_train_control.py \
+    --run-id s0_ls0.10_lr5.0e-06 \
+    --seed 0 \
+    --ctrl-convnext  results/checkpoints/control_seed_0/control_convnext.pt \
+    --ctrl-densenet  results/checkpoints/control_seed_0/control_densenet.pt \
+    --ctrl-inception results/checkpoints/control_seed_0/control_inception.pt
+\end{lstlisting}
+
+\textbf{\texttt{02\_train\_tc.py}} runs cyclone pre-training on all three
+architectures and then fine-tunes each backbone on the bug-bite task:
+
+\begin{lstlisting}[language=bash]
+python scripts/02_train_tc.py \
+    --run-id s0_ls0.10_lr5.0e-06 \
+    --seed 0 \
+    --label-smoothing 0.1 \
+    --phase2-lr 5e-6 \
+    --cyc-convnext  results/checkpoints/config_000/cyclone_convnext.pt \
+    --cyc-densenet  results/checkpoints/config_000/cyclone_densenet.pt \
+    --cyc-inception results/checkpoints/config_000/cyclone_inception.pt \
+    --tc-convnext   results/checkpoints/config_000/tc_bug_convnext.pt \
+    --tc-densenet   results/checkpoints/config_000/tc_bug_densenet.pt \
+    --tc-inception  results/checkpoints/config_000/tc_bug_inception.pt
+\end{lstlisting}
+
+\textbf{\texttt{03\_evaluate.py}} generates feature map visualisations and
+GradCAM overlays comparing the Control and TC backbones. Outputs are saved
+to \texttt{results/feature\_maps/\{run-id\}/} and
+\texttt{results/plots/\{run-id\}/}.
+
+\textbf{\texttt{04\_xai.py}} computes the full XAI suite for one
+configuration: ensemble accuracy, silhouette scores on backbone embeddings,
+t-SNE projections, LIME, SHAP, and DiCE. Outputs are saved to
+\texttt{results/xai/\{run-id\}/}. Optional XAI libraries are checked at
+runtime; cells that depend on missing libraries are skipped gracefully.
+
+\subsubsection{Automated Sweep Runner}
+\label{sec:mg-sweep}
+
+\texttt{miscellaneous\_code/run\_experiments.py} is the primary entry point
+for training. It iterates over the full 63-configuration hyperparameter grid,
+calls the four pipeline scripts in sequence for each configuration, and
+manages checkpointing, state, and results atomically.
+
+\begin{lstlisting}[language=bash]
+# Run all pending configurations
+python miscellaneous_code/run_experiments.py
+
+# Check progress without running
+python miscellaneous_code/run_experiments.py --status
+
+# Wipe state and results (checkpoints are preserved)
+python miscellaneous_code/run_experiments.py --reset
+\end{lstlisting}
+
+The configuration grid is defined by three constants at the top of the file:
+
+\begin{lstlisting}[language=Python]
+LABEL_SMOOTHING_VALUES = [0.0, 0.1, 0.2]
+PHASE2_LR_VALUES       = [1e-6, 5e-6, 1e-5]
+N_SEEDS                = 7
+\end{lstlisting}
+
+Adding values to these lists and re-running appends new configurations to
+the existing state file without invalidating completed work.
+
+\textbf{Pause and resume:}
+\begin{description}
+    \item[Graceful pause:] create \texttt{results/PAUSE}
+          (\texttt{touch results/PAUSE}) or press Ctrl-C. The runner
+          finishes the current model, saves its checkpoint, and exits.
+    \item[Crash recovery:] any configuration marked \texttt{running} in
+          the state file is automatically reset to \texttt{pending} on the
+          next run. Already-saved checkpoints are reused.
+\end{description}
+
+\textbf{Output files:}
+\begin{description}
+    \item[\texttt{results/experiment\_state.json}]
+          Tracks the status (\texttt{pending}, \texttt{running}, or
+          \texttt{completed}) of every configuration.
+    \item[\texttt{results/experiment\_results.json}]
+          Per-model, per-configuration evaluation results: validation
+          accuracy, macro F1, precision, recall, and classification report.
+    \item[\texttt{results/checkpoints/config\_\{id\}/}]
+          TC cyclone checkpoint (\texttt{cyclone\_\{model\}.pt}) and
+          TC bug-bite checkpoint (\texttt{tc\_bug\_\{model\}.pt}).
+    \item[\texttt{results/checkpoints/control\_seed\_\{s\}/}]
+          Control checkpoints, keyed by seed only.
+    \item[\texttt{results/xai/\{run-id\}/}]
+          Per-configuration XAI outputs: \texttt{ensemble\_metrics.json},
+          \\\texttt{silhouette.json}, t-SNE plots, GradCAM overlays, LIME
+          visualisations, SHAP attribution maps.
+\end{description}
+
+% ============================================================
+\subsection{Model Weights and Artifacts}
+\label{sec:mg-weights}
+% ============================================================
+
+Trained model weights are not stored in the repository. Two archives are
+available from \texttt{ishay.yulzary@gmail.com}:
+
+\begin{itemize}
+    \item \texttt{project\_book\_results.tar} --- the selected best-performing
+          checkpoints used in the inference demo (one Control config, one TC
+          config, three architectures each).
+    \item \textbf{Complete sweep archive} --- all 70 experiment configurations
+          (63 TC + 7 Control seeds), covering every trained checkpoint from
+          the published experiments. Request this for full evaluation
+          reproduction or sweep extension.
+\end{itemize}
+
+Weight subdirectories within the demo archive:
+\begin{itemize}
+    \item Control: \texttt{project\_book\_results/s3\_ls0.20\_lr1.0e-05/}
+    \item TC: \texttt{project\_book\_results/s6\_ls0.10\_lr5.0e-06/}
+\end{itemize}
+
+\textbf{Updating the weights archive after retraining:}
+New weight files are written to \texttt{results/checkpoints/}. Package the
+relevant checkpoint directories into a new
+\\\texttt{project\_book\_results.tar} and upload it to Google Drive, replacing
+the previous file.
+
+% ============================================================
+\subsection{XAI Methods}
+\label{sec:mg-xai}
+% ============================================================
+
+All XAI outputs are generated by \texttt{scripts/04\_xai.py} and by
+Section 4 of the main notebook.
+
+\begin{description}
+    \item[GradCAM] Class Activation Mapping via gradients. Implemented in
+          \texttt{scripts/shared.py}. Target layers: final stage for
+          ConvNeXt, \texttt{norm5} for DenseNet, \texttt{Mixed\_7c} for
+          InceptionV3. Produces side-by-side Control vs.\ TC attention
+          overlays.
+
+    \item[LIME] Superpixel-based local explanation using
+          \texttt{lime.lime\_image.LimeImageExplainer}. Top-$N$ segments
+          (default 12) are coloured by contribution sign and weight using a
+          red--blue palette. Computationally expensive; notebook default is
+          1000 samples per image.
+
+    \item[SHAP] Pixel-level attribution via \texttt{shap.GradientExplainer}.
+          A background distribution of 50 validation images is used.
+          Attributions are averaged across the three ensemble models and
+          overlaid on the input image.
+
+    \item[DiCE] Counterfactual explanations in embedding space. Backbone
+          embeddings are reduced with PCA (50 components) and a surrogate
+          logistic regression classifier is fitted on the validation set.
+          DiCE generates counterfactual vectors showing the minimal
+          directional change required to flip the predicted class.
+
+    \item[t-SNE] 2D projection of backbone embeddings for all five bug-bite
+          classes, displayed as a $3 \times 2$ grid (one row per
+          architecture, columns for Control and TC). Used to visualise
+          whether TC pre-training produces more separable cluster structure.
+
+    \item[Ensemble comparison] Soft-vote ensemble across all three
+          architectures. Control and TC ensembles are compared directly;
+          results saved to \texttt{ensemble\_metrics.json}.
+\end{description}
+
+% ============================================================
+\subsection{Extending the System}
+\label{sec:mg-extend}
+% ============================================================
+
+\subsubsection{Adding a New Architecture}
+
+\begin{enumerate}
+    \item Add an entry to the \texttt{MODELS} list in
+          \texttt{miscellaneous\_code/run\_experiments.py}:
+          \texttt{(key, timm\_id, img\_size, cyc\_p1\_bs, bug\_bs,
+          cyc\_p2\_epochs, bug\_p2\_epochs)}.
+    \item Identify the correct GradCAM target layer for the new architecture
+          and add a case to the \texttt{\_get\_target} function in
+          \texttt{Stacked\_Model\_Colab.ipynb} and in
+          \texttt{scripts/shared.py}.
+    \item Re-run the sweep. New configurations are appended automatically;
+          existing results are not invalidated.
+\end{enumerate}
+
+\subsubsection{Adding a New Bug-Bite Class}
+
+\begin{enumerate}
+    \item Add labelled images to
+          \texttt{Bug-Data/Multiclass\_Bug\_data/train/} and \texttt{val/}
+          under a new subdirectory named after the class.
+    \item Update \texttt{N\_CLASSES} in \texttt{run\_experiments.py} if
+          necessary (currently 5).
+    \item Retrain from scratch. Existing checkpoints are incompatible with
+          a different number of output classes.
+\end{enumerate}
+
+\subsubsection{Adapting to a New Intermediate Domain}
+
+The TC pipeline is not specific to cyclone imagery. Any image classification
+task can serve as the intermediate pre-training domain:
+\begin{enumerate}
+    \item Place the new domain dataset at \texttt{TC\_TRAIN} /
+          \texttt{TC\_VAL} in \texttt{run\_experiments.py}.
+    \item Adjust the augmentation strategy in \texttt{get\_pytorch\_loaders}
+          if the new domain does not share cyclone imagery's rotational
+          symmetry properties.
+    \item Update the \texttt{augment='strong'} branch of
+          \texttt{pytorch\_utils.py} accordingly.
+\end{enumerate}
+
+\subsubsection{Path Toward Productisation}
+
+The current system is a research prototype. Steps required before deployment:
+
+\begin{enumerate}
+    \item \textbf{Model serving:} wrap the ensemble inference logic from
+          \texttt{Stacked\_Model\_Colab.ipynb} in a REST API endpoint
+          (e.g.\ FastAPI). The core inference function is approximately
+          30 lines of PyTorch code.
+    \item \textbf{Weight hosting:} move trained weights from Google Drive
+          to a persistent object store (e.g.\ AWS S3, GCP Cloud Storage).
+    \item \textbf{Input validation:} add image size checks, colour space
+          normalisation, and rejection of non-photographic inputs.
+    \item \textbf{Dataset expansion:} the current bug-bite dataset is small
+          (fewer than 500 images per class). Classification performance will
+          improve substantially with a larger, clinically curated dataset.
+    \item \textbf{Clinical validation:} model outputs should be reviewed by
+          a medical professional before any medical application.
+\end{enumerate}
 
 % ============================================================
 \subsection{Troubleshooting}
@@ -388,37 +663,35 @@ Archive exists: False
 \begin{enumerate}
     \item Verify that \texttt{project\_book\_results.tar} is present in
           \texttt{MyDrive/Capstone/} in your Google Drive.
-    \item Check that you authorised Drive access when Colab prompted for it
-          in Section 2. If you skipped the authorisation dialog, re-run the
-          mount cell and complete the authorisation.
-    \item If the \texttt{PROJECT\_ROOT} path in Section 2 does not match
-          your Drive folder structure, update the value directly inside
-          that cell in the notebook source and re-run it. Changing it in
-          a separate cell is not sufficient, as subsequent cells reference
-          the variable by name.
+    \item Check that you authorised Drive access when Colab prompted in
+          Section 2. If skipped, re-run the mount cell.
+    \item If the \texttt{PROJECT\_ROOT} path does not match your Drive
+          folder structure, update the value directly inside that cell in
+          the notebook source and re-run it. Changing it in a separate cell
+          is not sufficient, as subsequent cells reference the variable by
+          name.
 \end{enumerate}
 
 \subsubsection{Model weights not found after extraction}
 
-\textbf{Symptom:} Section 5 raises a \texttt{FileNotFoundError} when
-loading model weights.
+\textbf{Symptom:} Section 5 raises \texttt{FileNotFoundError} when loading
+model weights.
 
 \textbf{Resolution:}
 \begin{enumerate}
-    \item Re-run Section 3 and confirm the extraction step completes
-          without errors.
-    \item In the cell output, verify that the listed \texttt{.pt} files
-          match the expected names:
-          \texttt{control\_convnext.pt}, \texttt{control\_densenet.pt},
+    \item Re-run Section 3 and confirm extraction completes without errors.
+    \item Verify the listed \texttt{.pt} files match the expected names:
+          \texttt{control\_convnext.pt}, \\\texttt{control\_densenet.pt},
           \texttt{control\_inception.pt},
-          \\\texttt{tc\_bug\_convnext.pt}, \texttt{tc\_bug\_densenet.pt},
+          \texttt{tc\_bug\_convnext.pt}, \texttt{tc\_bug\_densenet.pt},
           \texttt{tc\_bug\_inception.pt}.
     \item If the archive structure differs from the expected layout, update
-          the \texttt{CTRL\_SUBDIR} and \texttt{TC\_SUBDIR} variables in
-          Section 5 to match the actual subdirectory names inside the archive.
+          \texttt{CTRL\_SUBDIR} and \texttt{TC\_SUBDIR} in Section 5 to
+          match the actual subdirectory names.
 \end{enumerate}
 
 \subsubsection{GPU out-of-memory error during training}
+\label{sec:mg-troubleshoot-oom}
 
 \textbf{Symptom:} \texttt{torch.cuda.OutOfMemoryError} during
 \texttt{run\_experiments.py}.
@@ -427,12 +700,12 @@ loading model weights.
 \begin{enumerate}
     \item Reduce the batch size for the affected architecture in the
           \texttt{MODELS} list in \texttt{run\_experiments.py}.
-          The relevant columns are \texttt{cyc\_p1\_bs} (cyclone phase-1
-          batch size) and \texttt{bug\_bs} (bug-bite batch size).
-    \item For InceptionV3 in particular, the phase-1 batch size may need
-          to be reduced to 64 or below on GPUs with less than 24\,GB VRAM.
-    \item Re-run the sweep. Configurations that completed before the crash
-          are not repeated.
+          Relevant columns: \texttt{cyc\_p1\_bs} (cyclone phase-1 batch
+          size) and \texttt{bug\_bs} (bug-bite batch size).
+    \item For InceptionV3, the phase-1 batch size may need to be reduced
+          to 64 or below on GPUs with less than 24\,GB VRAM.
+    \item Re-run the sweep. Configurations that completed before the
+          crash are not repeated.
 \end{enumerate}
 
 \subsubsection{NOAA download failures during cyclone dataset fetch}
@@ -441,7 +714,6 @@ loading model weights.
 \begin{lstlisting}
 ! Index fetch failed for <year>: ...
 \end{lstlisting}
-or slow/incomplete downloads.
 
 \textbf{Resolution:}
 \begin{enumerate}
@@ -451,7 +723,7 @@ or slow/incomplete downloads.
 \begin{lstlisting}[language=bash]
 python miscellaneous_code/fetch_cyclone_dataset.py --workers 2
 \end{lstlisting}
-    \item If NOAA servers are temporarily unavailable, contact
+    \item If NOAA servers are unavailable, contact
           \texttt{ishay.yulzary@gmail.com} to obtain the pre-built dataset
           archive directly.
 \end{enumerate}
@@ -461,27 +733,26 @@ python miscellaneous_code/fetch_cyclone_dataset.py --workers 2
 \textbf{Symptom:} Section 9 of the inference notebook appears to hang.
 
 \textbf{Resolution:}
-LIME generates 50 perturbed versions of the input image and runs each through
-all six models. On a Colab CPU runtime this takes 2--5 minutes; this is
-expected behaviour. Do not interrupt the cell. If the session times out,
-re-run Sections 4 and 5 to reload the models, then re-run Section 9.
+LIME generates 50 perturbed versions of the input image and runs each
+through all six models. On a Colab CPU runtime this takes 2--5 minutes;
+this is expected behaviour. Do not interrupt the cell. If the session times
+out, re-run Sections 4 and 5 to reload the models, then re-run Section 9.
 
 \subsubsection{Training sweep shows no progress after resuming}
 
-\textbf{Symptom:} Re-running \texttt{run\_experiments.py} after an
-interruption prints \texttt{All configs already completed} but results
-appear incomplete.
+\textbf{Symptom:} Re-running \texttt{run\_experiments.py} prints
+\texttt{All configs already completed} but results appear incomplete.
 
 \textbf{Resolution:}
 \begin{enumerate}
-    \item Run \texttt{python miscellaneous\_code/run\_experiments.py --status}
-          to view the current state of each configuration.
+    \item Run \texttt{python miscellaneous\_code/run\_experiments.py
+          --status} to view the current state of each configuration.
     \item If all 63 configurations report \texttt{completed} but results
-          are missing, the \\\texttt{results/experiment\_results.json} file
-          may be corrupted or empty. Delete it and re-run; the sweep will
-          re-evaluate all existing checkpoints without retraining.
-    \item If fewer than 63 configurations are completed, the pending ones
-          will resume automatically on the next run.
+          are missing, \\\texttt{results/experiment\_results.json} may be
+          corrupted. Delete it and re-run; the sweep will re-evaluate all
+          existing checkpoints without retraining.
+    \item If fewer than 63 configurations are completed, pending ones
+          resume automatically on the next run.
 \end{enumerate}
 
 % ============================================================
@@ -492,23 +763,23 @@ appear incomplete.
 \begin{description}
     \item[Primary contact] Ishay Yulzary ---
           \texttt{ishay.yulzary@gmail.com}.
-          Contact for: weight archive access, pre-built dataset access,
-          environment specification, and questions not covered in this guide.
+          Contact for: weight archive access, dataset access, environment
+          specification, and questions not covered in this guide.
 
-    \item[Repository] The source code, notebooks, and bug-bite dataset
-          are maintained in the project GitHub repository.
+    \item[Repository] Source code, notebooks, and bug-bite dataset are
+          maintained in the project GitHub repository.
 
     \item[Data sources] The cyclone dataset is derived from:
           \begin{itemize}
-              \item HURSAT-B1 satellite imagery:
+              \item HURSAT-B1:
                     \\\url{https://www.ncei.noaa.gov/products/hurricane-satellite-data}
-              \item IBTrACS best-track records:
+              \item IBTrACS:
                     \\\url{https://www.ncei.noaa.gov/products/international-best-track-archive}
           \end{itemize}
           Both are freely available from NOAA.
 
-    \item[Model library] Neural network architectures are loaded via the
-          \texttt{timm} library (\url{https://github.com/huggingface/pytorch-image-models}).
+    \item[Model library] Architectures are loaded via the \texttt{timm}
+          library (\url{https://github.com/huggingface/pytorch-image-models}).
           Pre-trained ImageNet weights are downloaded automatically by
           \texttt{timm} on first use.
 \end{description}

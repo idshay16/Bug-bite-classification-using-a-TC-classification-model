@@ -1,0 +1,297 @@
+% ============================================================
+%  USER GUIDE
+%  Bug-Bite Classification via Tropical Cyclone Transfer Learning
+%  Braude College of Engineering — Software Engineering Capstone
+%
+%  Usage in Overleaf:
+%    \appendix
+%    \input{user_guide}
+%
+%  Or compile standalone:
+%    Uncomment the preamble block below, and add \end{document} at the end.
+% ============================================================
+
+% --- Standalone preamble (remove if including in main document) ----------
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{parskip}
+\lstset{basicstyle=\ttfamily\small, breaklines=true, frame=single,
+        backgroundcolor=\color{gray!8}}
+\begin{document}
+\title{User Guide\\
+       \large Bug-Bite Classification via Tropical Cyclone Transfer Learning\\
+       Braude College of Engineering --- Software Engineering Capstone}
+\author{Ishay Yulzary, Nathan Trostianitser}
+\date{}
+\maketitle
+\tableofcontents
+\newpage
+% -------------------------------------------------------------------------
+
+\section{User Guide}
+\label{app:user-guide}
+
+This guide covers two use scenarios for the system:
+
+\begin{enumerate}
+    \item \textbf{Running the automated training pipeline:} execute the
+          full hyperparameter sweep to train and evaluate all model
+          configurations. This is the primary use of the system.
+    \item \textbf{Running inference via the demo notebook:} classify a
+          single bug-bite image using the pre-trained ensemble on Google
+          Colab, without any local setup.
+\end{enumerate}
+
+% ============================================================
+\subsection{What the System Does}
+\label{sec:ug-overview}
+% ============================================================
+
+The primary output of this project is an automated machine learning
+pipeline that trains and evaluates an ensemble of neural network classifiers
+under two paradigms:
+
+\begin{description}
+    \item[Control] Models trained directly from ImageNet weights on the
+          bug-bite dataset (single-stage transfer).
+    \item[TC (Transfer Classification)] Models first pre-trained on tropical
+          cyclone satellite imagery, then fine-tuned on the bug-bite dataset
+          (two-stage transfer). This is the primary research contribution.
+\end{description}
+
+The pipeline sweeps across 63 hyperparameter configurations (3
+label-smoothing values $\times$ 3 learning rates $\times$ 7 random seeds),
+trains three backbone architectures (ConvNeXt-Tiny, DenseNet-121,
+InceptionV3) under each configuration, and automatically evaluates each
+result using accuracy metrics and a full suite of explainability methods
+(GradCAM, LIME, SHAP, DiCE, t-SNE).
+
+A secondary output is a demo notebook (\texttt{Stacked\_Model\_Colab.ipynb})
+that loads the best-performing pre-trained models and runs ensemble
+inference on a single bug-bite image.
+
+\textbf{Important:} This system is a research prototype. Its outputs are
+not suitable for clinical or diagnostic use.
+
+% ============================================================
+\subsection{Use Scenario 1: Running the Automated Training Pipeline}
+\label{sec:ug-pipeline}
+% ============================================================
+
+This scenario describes how to run the full hyperparameter sweep from start
+to results. A dedicated GPU machine is required.
+
+\subsubsection{Prerequisites}
+
+\begin{itemize}
+    \item A CUDA-capable GPU (8\,GB VRAM minimum, 16\,GB or more
+          recommended).
+    \item Python 3.x with the required packages installed:
+\begin{lstlisting}[language=bash]
+pip install torch torchvision timm numpy Pillow opencv-python \
+            scikit-learn matplotlib tqdm shap lime scikit-image dice-ml
+\end{lstlisting}
+    \item The project repository cloned locally.
+    \item The bug-bite dataset (included in the repository under
+          \texttt{Bug-Data/Multiclass\_Bug\_data/}).
+    \item The cyclone dataset (fetched via the provided script, or
+          available from \texttt{ishay.yulzary@gmail.com}).
+\end{itemize}
+
+\subsubsection{Step 1: Fetch the Cyclone Dataset}
+
+From the repository root, run:
+
+\begin{lstlisting}[language=bash]
+# Full dataset: 4000 images per category (~4 hours)
+python miscellaneous_code/fetch_cyclone_dataset.py
+
+# Quick trial: 5 images per category (for testing the pipeline)
+python miscellaneous_code/fetch_cyclone_dataset.py --trial
+\end{lstlisting}
+
+The download is resumable: if interrupted, re-run the same command and it
+continues from where it stopped.
+
+\subsubsection{Step 2: Configure Dataset Paths}
+
+Open \texttt{miscellaneous\_code/run\_experiments.py} and set the four
+path constants at the top of the file to point to your local dataset
+locations:
+
+\begin{lstlisting}[language=Python]
+BUG_TRAIN = '/path/to/bug_data/train'
+BUG_VAL   = '/path/to/bug_data/val'
+TC_TRAIN  = '/path/to/cyclone_data_split/train'
+TC_VAL    = '/path/to/cyclone_data_split/val'
+\end{lstlisting}
+
+\subsubsection{Step 3: Run the Sweep}
+
+\begin{lstlisting}[language=bash]
+python miscellaneous_code/run_experiments.py
+\end{lstlisting}
+
+The sweep iterates over all 63 configurations. For each configuration it
+runs cyclone pre-training, bug-bite fine-tuning, GradCAM evaluation, and
+the full XAI suite in sequence. Check progress at any time without
+interrupting:
+
+\begin{lstlisting}[language=bash]
+python miscellaneous_code/run_experiments.py --status
+\end{lstlisting}
+
+The sweep can be paused safely at any point by pressing \textbf{Ctrl-C}
+or creating the file \texttt{results/PAUSE}. Re-running the same command
+resumes from where it stopped. Interrupted configurations are automatically
+recovered on the next run.
+
+\subsubsection{Step 4: Review Results}
+
+After the sweep completes (or at any point during it), results are
+available in the following locations:
+
+\begin{description}
+    \item[\texttt{results/experiment\_results.json}]
+          Per-model, per-configuration validation accuracy, macro F1,
+          precision, and recall for all completed configurations.
+    \item[\texttt{results/xai/\{run-id\}/ensemble\_metrics.json}]
+          Ensemble accuracy for each configuration (soft-vote across all
+          three architectures, Control and TC compared directly).
+    \item[\texttt{results/xai/\{run-id\}/silhouette.json}]
+          Silhouette scores on backbone embeddings, measuring class
+          separability in the learned feature space.
+    \item[\texttt{results/plots/\{run-id\}/}]
+          Training curves, per-class F1, and ROC curves.
+    \item[\texttt{results/xai/\{run-id\}/}]
+          t-SNE projections, GradCAM overlays, LIME visualisations, and
+          SHAP attribution maps.
+    \item[\texttt{results/checkpoints/}]
+          Saved model weights for all completed configurations.
+\end{description}
+
+\textbf{Summary of published results:} TC pre-training matches or exceeds
+the Control baseline across all tested configurations. The best TC ensemble
+accuracy is \textbf{83.27\%} (mean over 7 seeds, ls=0.10,
+lr=$5\times10^{-6}$) vs.\ a Control mean of \textbf{81.83\%}
+($+1.45$ percentage points). The best single-run TC accuracy is
+\textbf{86.08\%}.
+
+% ============================================================
+\subsection{Use Scenario 2: Inference via the Demo Notebook}
+\label{sec:ug-inference}
+% ============================================================
+
+This scenario describes how to classify a single bug-bite image using the
+pre-trained ensemble on Google Colab. No local installation or GPU is
+required.
+
+\subsubsection{Prerequisites}
+
+\begin{enumerate}
+    \item A Google account.
+    \item The file \texttt{project\_book\_results.tar} placed in your
+          Google Drive. Contact \texttt{ishay.yulzary@gmail.com} to
+          request access. Recommended location:
+\begin{lstlisting}
+MyDrive/Capstone/project_book_results.tar
+\end{lstlisting}
+    \item A bug-bite image in JPEG or PNG format.
+\end{enumerate}
+
+\subsubsection{Step 1: Open the Notebook}
+
+\begin{enumerate}
+    \item Go to \url{https://colab.research.google.com}.
+    \item Select \textbf{File} $\rightarrow$ \textbf{Open notebook}
+          $\rightarrow$ \textbf{GitHub}.
+    \item Paste the project repository URL and select
+          \texttt{Stacked\_Model\_Colab.ipynb}.
+\end{enumerate}
+
+\subsubsection{Step 2: Install Dependencies}
+
+Run \textbf{Section 1}. Installs all required packages. Takes approximately
+one minute and only runs once per Colab session.
+
+\subsubsection{Step 3: Mount Drive and Verify Setup}
+
+Run \textbf{Section 2}. Authorise Colab to access your Google Drive.
+Confirm the output reads:
+
+\begin{lstlisting}
+PROJECT_ROOT exists: True
+Archive exists:      True
+\end{lstlisting}
+
+If your archive is stored at a different Drive path, update
+\texttt{PROJECT\_ROOT} directly inside the Section 2 cell before running:
+
+\begin{lstlisting}[language=Python]
+PROJECT_ROOT = '/content/drive/MyDrive/YourFolder'
+\end{lstlisting}
+
+This must be changed inside the cell itself, not in a separate cell.
+
+\subsubsection{Step 4: Extract Weights and Load Models}
+
+Run \textbf{Section 3} to extract the archive (2--5 minutes on first run;
+skipped automatically on subsequent runs). Then run \textbf{Section 4}
+and \textbf{Section 5} to load the six pre-trained models. Successful
+loading prints:
+
+\begin{lstlisting}
+All models loaded.
+\end{lstlisting}
+
+\subsubsection{Step 5: Run Inference}
+
+In \textbf{Section 7}, set \texttt{IMG\_PATH} to your image:
+
+\textbf{Option A: Image on Google Drive.}
+\begin{lstlisting}[language=Python]
+IMG_PATH = '/content/drive/MyDrive/your_image.jpg'
+\end{lstlisting}
+
+\textbf{Option B: Upload directly to Colab.}
+\begin{lstlisting}[language=Python]
+from google.colab import files
+up = files.upload()
+IMG_PATH = list(up.keys())[0]
+\end{lstlisting}
+
+Run the cell. The output shows the predicted bug-bite category and
+a probability distribution over all five classes for both the Control
+and TC ensembles side by side.
+
+\subsubsection{Step 6: Generate Visual Explanations}
+
+\textbf{GradCAM (Section 8):} produces a $3 \times 2$ grid of attention
+heatmaps (one row per architecture, one column per pipeline). Warm-coloured
+regions had the strongest influence on the prediction.
+
+\textbf{LIME (Section 9):} produces superpixel attribution maps. Green
+regions support the predicted class; red regions contradict it. Takes
+2--5 minutes on a CPU runtime.
+
+% ============================================================
+\subsection{Contact}
+\label{sec:ug-contact}
+% ============================================================
+
+For access to model weights, datasets, or the environment specification:
+
+\medskip
+\noindent\textbf{Ishay Yulzary} --- \texttt{ishay.yulzary@gmail.com}
+
+% --- End of appendix (remove if standalone) ---
+\end{document}
