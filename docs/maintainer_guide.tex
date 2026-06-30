@@ -75,8 +75,21 @@ inference can be run.
 \subsubsection{Obtaining the Weights}
 
 Contact \textbf{ishay.yulzary@gmail.com} to request access to the weights
-archive. You will receive the file \texttt{project\_book\_results.tar}.
-Place this file anywhere in your Google Drive, for example:
+archive. Two archives are available:
+
+\begin{itemize}
+    \item \texttt{project\_book\_results.tar} --- the selected best-performing
+          checkpoints used in the demo notebook (one Control config, one TC config,
+          three architectures each). This is sufficient for running inference.
+    \item \textbf{Complete sweep archive} --- all 70 experiment configurations
+          (63 TC hyperparameter configs $\times$ 7 seeds, plus 7 Control seeds),
+          covering every trained checkpoint from the published experiments.
+          Request this if you intend to reproduce the full evaluation or extend
+          the sweep.
+\end{itemize}
+
+For inference, place \texttt{project\_book\_results.tar} anywhere in your
+Google Drive, for example:
 
 \begin{lstlisting}
 MyDrive/Capstone/project_book_results.tar
@@ -229,14 +242,24 @@ data is significantly expanded. It is not required for routine operation.
 \subsubsection{Hardware Requirements}
 
 \textbf{A dedicated GPU is required for retraining.} The full training sweep
-(63 configurations) was completed on an NVIDIA RTX A5000 (24\,GB VRAM) and
-took approximately 100--130 hours of continuous GPU time. Google Colab free
-tier is not sufficient for retraining; a Colab Pro instance with a high-RAM
-GPU runtime, or equivalent dedicated hardware, is the minimum viable option
-for partial retraining.
+was completed on the following hardware:
 
-If only a single configuration needs to be retrained (rather than the full
-sweep), the estimated runtime is 1.5--2 hours on equivalent hardware.
+\begin{itemize}
+    \item \textbf{CPU:} Intel Core i7-9700KF @ 5.10\,GHz all-core OC (8 cores / 8 threads)
+    \item \textbf{RAM:} 32\,GB
+    \item \textbf{GPU:} NVIDIA RTX A5000 (24\,GB GDDR6 VRAM)
+\end{itemize}
+
+The full 63-configuration sweep took approximately 100--130 hours of continuous
+GPU time on this system. Google Colab free tier is not suitable for the full
+sweep due to session time limits; a Colab Pro instance with a high-RAM GPU
+runtime is the minimum viable option for partial retraining.
+
+If only a single configuration needs to be retrained, the estimated runtime is
+1.5--2 hours on the reference hardware above. The default batch size of 4
+allows training to run on GPUs with as little as 8\,GB VRAM, though InceptionV3
+phase-1 training may require reducing the batch size further on GPUs below
+24\,GB VRAM.
 
 \subsubsection{Preparing the Cyclone Dataset}
 \label{sec:mg-retrain-data}

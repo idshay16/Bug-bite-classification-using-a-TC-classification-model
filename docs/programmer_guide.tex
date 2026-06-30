@@ -506,9 +506,20 @@ The sweep can be interrupted and resumed at any point:
 
 \subsubsection{Hardware Requirements}
 
-The full 63-configuration sweep was run on an NVIDIA RTX A5000 (24\,GB VRAM).
-A GPU with at least 16\,GB VRAM is recommended for training. Estimated runtime
-per configuration is 1.5--2 hours on equivalent hardware.
+The full 63-configuration sweep was run on the following hardware:
+
+\begin{itemize}
+    \item \textbf{CPU:} Intel Core i7-9700KF @ 5.10\,GHz all-core OC (8 cores / 8 threads)
+    \item \textbf{RAM:} 32\,GB
+    \item \textbf{GPU:} NVIDIA RTX A5000 (24\,GB GDDR6 VRAM)
+\end{itemize}
+
+Estimated runtime per configuration is 1.5--2 hours on equivalent hardware.
+A GPU with at least 16\,GB VRAM is recommended for retraining; the default
+batch size of 4 allows training to run on GPUs with as little as 8\,GB VRAM
+at the cost of slower convergence. A free-tier Colab T4 (16\,GB) is sufficient
+for training individual configurations but is not practical for the full sweep
+due to session time limits.
 Inference and visualisation (scripts \texttt{03} and \texttt{04}) can be run
 on CPU or a smaller GPU.
 
@@ -626,7 +637,10 @@ local dataset.
 \begin{enumerate}
     \item A Google account with access to the project Google Drive folder.
           The folder must contain \texttt{project\_book\_results.tar},
-          which packages all trained weight files.
+          which packages the best-performing Control and TC checkpoints
+          selected for the demo. The complete weight archive covering all
+          70 experiment configurations (63 TC + 7 Control seeds) is
+          available on request from \texttt{ishay.yulzary@gmail.com}.
     \item The notebook set \texttt{PROJECT\_ROOT} to the correct Drive path
           \\(default: \texttt{/content/drive/MyDrive/Capstone}).
 \end{enumerate}
