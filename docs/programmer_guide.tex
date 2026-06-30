@@ -12,21 +12,29 @@
 % ============================================================
 
 % --- Standalone preamble (remove if including in main document) ----------
-% \documentclass[12pt,a4paper]{article}
-% \usepackage[utf8]{inputenc}
-% \usepackage[T1]{fontenc}
-% \usepackage{geometry}
-% \geometry{margin=2.5cm}
-% \usepackage{hyperref}
-% \usepackage{listings}
-% \usepackage{xcolor}
-% \usepackage{booktabs}
-% \usepackage{array}
-% \usepackage{enumitem}
-% \usepackage{parskip}
-% \lstset{basicstyle=\ttfamily\small, breaklines=true, frame=single,
-%         backgroundcolor=\color{gray!8}}
-% \begin{document}
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{parskip}
+\lstset{basicstyle=\ttfamily\small, breaklines=true, frame=single,
+        backgroundcolor=\color{gray!8}}
+\begin{document}
+\title{Programmer's Guide\\
+       \large Bug-Bite Classification via Tropical Cyclone Transfer Learning\\
+       Braude College of Engineering --- Software Engineering Capstone}
+\author{Ishay Yulzary, Nathan Trostianitser}
+\date{}
+\maketitle
+\tableofcontents
+\newpage
 % -------------------------------------------------------------------------
 
 \section{Programmer's Guide}
@@ -298,7 +306,7 @@ The dataset is available via two channels:
           the repository and can be used directly.
     \item \textbf{Pre-processed archive:} a curated and pre-processed version,
           including augmented samples used in the published experiments, is
-          available on request from \texttt{ishay.yulzary@gmail.com}.
+          available on request from\\\texttt{ishay.yulzary@gmail.com}.
 \end{enumerate}
 
 Dataset paths are configured at the top of \texttt{miscellaneous\_code/run\_experiments.py}
@@ -339,7 +347,7 @@ Images cover the years 1995--2016. Each frame is clipped to the brightness
 temperature range $[180, 300]\,\text{K}$, inverted (so cold cloud tops appear
 bright), and saved as a $224\times224$ PNG.
 
-\paragraph{Fetching the dataset.}
+\subsubsection*{Fetching the dataset}
 
 \begin{lstlisting}[language=bash]
 # Full dataset: 4000 images per category (20000 total, ~4h on a stable connection)
@@ -353,7 +361,7 @@ python miscellaneous_code/fetch_cyclone_dataset.py --target 2000 --workers 8
 \end{lstlisting}
 
 The script is resumable: interrupted runs pick up from where they stopped
-using \texttt{cyclone\_dataset/download\_log.json}. The output directory
+using \\\texttt{cyclone\_dataset/download\_log.json}. The output directory
 defaults to \texttt{cyclone\_dataset/} in the working directory.
 
 After fetching, the dataset must be split into train/val and placed at the
@@ -492,7 +500,7 @@ The sweep can be interrupted and resumed at any point:
           independent of the cyclone hyperparameters).
     \item[\texttt{results/xai/\{run-id\}/}]
           Per-configuration XAI outputs: \texttt{ensemble\_metrics.json},
-          \texttt{silhouette.json}, t-SNE plots, GradCAM overlays,
+          \\\texttt{silhouette.json}, t-SNE plots, GradCAM overlays,
           LIME visualisations, SHAP attribution maps.
 \end{description}
 
@@ -620,7 +628,7 @@ local dataset.
           The folder must contain \texttt{project\_book\_results.tar},
           which packages all trained weight files.
     \item The notebook set \texttt{PROJECT\_ROOT} to the correct Drive path
-          (default: \texttt{/content/drive/MyDrive/Capstone}).
+          \\(default: \texttt{/content/drive/MyDrive/Capstone}).
 \end{enumerate}
 
 \paragraph{Workflow.}
@@ -708,4 +716,4 @@ before deployment:
 \end{enumerate}
 
 % --- End of appendix (remove if standalone) ---
-% \end{document}
+\end{document}

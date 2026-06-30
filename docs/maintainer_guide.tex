@@ -12,21 +12,29 @@
 % ============================================================
 
 % --- Standalone preamble (remove if including in main document) ----------
-% \documentclass[12pt,a4paper]{article}
-% \usepackage[utf8]{inputenc}
-% \usepackage[T1]{fontenc}
-% \usepackage{geometry}
-% \geometry{margin=2.5cm}
-% \usepackage{hyperref}
-% \usepackage{listings}
-% \usepackage{xcolor}
-% \usepackage{booktabs}
-% \usepackage{array}
-% \usepackage{enumitem}
-% \usepackage{parskip}
-% \lstset{basicstyle=\ttfamily\small, breaklines=true, frame=single,
-%         backgroundcolor=\color{gray!8}}
-% \begin{document}
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{parskip}
+\lstset{basicstyle=\ttfamily\small, breaklines=true, frame=single,
+        backgroundcolor=\color{gray!8}}
+\begin{document}
+\title{Maintainer's Guide\\
+       \large Bug-Bite Classification via Tropical Cyclone Transfer Learning\\
+       Braude College of Engineering --- Software Engineering Capstone}
+\author{Ishay Yulzary, Nathan Trostianitser}
+\date{}
+\maketitle
+\tableofcontents
+\newpage
 % -------------------------------------------------------------------------
 
 \section{Maintainer's Guide}
@@ -68,13 +76,18 @@ inference can be run.
 
 Contact \textbf{ishay.yulzary@gmail.com} to request access to the weights
 archive. You will receive the file \texttt{project\_book\_results.tar}.
-Place this file in the following location in your Google Drive:
+Place this file anywhere in your Google Drive, for example:
 
 \begin{lstlisting}
 MyDrive/Capstone/project_book_results.tar
 \end{lstlisting}
 
-The notebook extracts the archive automatically on first run.
+The notebook extracts the archive automatically on first run. If you place
+the file in a different Drive location, you must update the
+\texttt{PROJECT\_ROOT} variable directly inside the corresponding cell in
+\texttt{Stacked\_Model\_Colab.ipynb} to match your chosen path. Changing
+it in a separate cell is not sufficient, as all subsequent cells reference
+the variable by name.
 
 \subsubsection{Obtaining the Datasets}
 
@@ -133,6 +146,18 @@ Archive exists:      True
 
 If either line reads \texttt{False}, see
 Section~\ref{sec:mg-troubleshoot} for remediation steps.
+
+\paragraph{Using a different Drive path.}
+The notebook defaults to \texttt{MyDrive/Capstone} as the project root.
+If your weights archive is stored at a different location, you must update
+the \texttt{PROJECT\_ROOT} variable directly in the notebook source before
+running Section 2. In Colab, open the cell containing:
+\begin{lstlisting}[language=Python]
+PROJECT_ROOT = '/content/drive/MyDrive/Capstone'
+\end{lstlisting}
+and change the path to match your Drive folder structure. This change must
+be made in the cell itself, not just in a separate cell, because other
+cells reference \texttt{PROJECT\_ROOT} by name.
 
 \subsubsection{Step 4: Extract Model Weights}
 
@@ -344,8 +369,10 @@ Archive exists: False
           in Section 2. If you skipped the authorisation dialog, re-run the
           mount cell and complete the authorisation.
     \item If the \texttt{PROJECT\_ROOT} path in Section 2 does not match
-          your Drive folder structure, update it to the correct path and
-          re-run the cell.
+          your Drive folder structure, update the value directly inside
+          that cell in the notebook source and re-run it. Changing it in
+          a separate cell is not sufficient, as subsequent cells reference
+          the variable by name.
 \end{enumerate}
 
 \subsubsection{Model weights not found after extraction}
@@ -361,7 +388,7 @@ loading model weights.
           match the expected names:
           \texttt{control\_convnext.pt}, \texttt{control\_densenet.pt},
           \texttt{control\_inception.pt},
-          \texttt{tc\_bug\_convnext.pt}, \texttt{tc\_bug\_densenet.pt},
+          \\\texttt{tc\_bug\_convnext.pt}, \texttt{tc\_bug\_densenet.pt},
           \texttt{tc\_bug\_inception.pt}.
     \item If the archive structure differs from the expected layout, update
           the \texttt{CTRL\_SUBDIR} and \texttt{TC\_SUBDIR} variables in
@@ -427,7 +454,7 @@ appear incomplete.
     \item Run \texttt{python miscellaneous\_code/run\_experiments.py --status}
           to view the current state of each configuration.
     \item If all 63 configurations report \texttt{completed} but results
-          are missing, the \texttt{results/experiment\_results.json} file
+          are missing, the \\\texttt{results/experiment\_results.json} file
           may be corrupted or empty. Delete it and re-run; the sweep will
           re-evaluate all existing checkpoints without retraining.
     \item If fewer than 63 configurations are completed, the pending ones
@@ -451,9 +478,9 @@ appear incomplete.
     \item[Data sources] The cyclone dataset is derived from:
           \begin{itemize}
               \item HURSAT-B1 satellite imagery:
-                    \url{https://www.ncei.noaa.gov/products/hurricane-satellite-data}
+                    \\\url{https://www.ncei.noaa.gov/products/hurricane-satellite-data}
               \item IBTrACS best-track records:
-                    \url{https://www.ncei.noaa.gov/products/international-best-track-archive}
+                    \\\url{https://www.ncei.noaa.gov/products/international-best-track-archive}
           \end{itemize}
           Both are freely available from NOAA.
 
@@ -464,4 +491,4 @@ appear incomplete.
 \end{description}
 
 % --- End of appendix (remove if standalone) ---
-% \end{document}
+\end{document}
