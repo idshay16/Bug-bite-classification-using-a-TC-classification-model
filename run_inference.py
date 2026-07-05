@@ -52,22 +52,27 @@ _TC_NAMES = {
     'inception': 'tc_bug_inception.pt',
 }
 
+# per-arch override — best config per model (by balanced_acc), mixed across sweep runs
+_TC_PATHS = {
+    'convnext':  ROOT / 'results/checkpoints/config_014/tc_bug_convnext.pt',
+    'densenet':  ROOT / 'results/checkpoints/config_050/tc_bug_densenet.pt',
+    'inception': ROOT / 'results/checkpoints/config_054/tc_bug_inception.pt',
+}
+
 _mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
 _std  = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
 
 
-def load_models(use_tc, device):
+def load_models(use_tc, device, best_per_arch=False):
     torch.backends.cudnn.benchmark = True
-    name_map  = _TC_NAMES   if use_tc else _CTRL_NAMES
-    weights_dir = TC_WEIGHTS_DIR if use_tc else CTRL_WEIGHTS_DIR
     models = {}
     for key, timm_id, _ in ARCHS:
-        path = weights_dir / name_map[key]
+        if use_tc:
+            path = _TC_PATHS[key] if best_per_arch else TC_WEIGHTS_DIR / _TC_NAMES[key]
+        else:
+            path = CTRL_WEIGHTS_DIR / _CTRL_NAMES[key]
         if not path.exists():
-            raise FileNotFoundError(
-                f'Weight not found: {path}\n'
-                f'Copy from results/checkpoints/{"config_058" if use_tc else "control_seed_3"}/'
-            )
+            raise FileNotFoundError(f'Weight not found: {path}')
         m = timm.create_model(timm_id, pretrained=False, num_classes=N_CLASSES)
         m.load_state_dict(torch.load(str(path), map_location=device, weights_only=True))
         models[key] = m.to(device).eval()
@@ -86,14 +91,17 @@ def _resize_norm(t_base, size, device):
 
 
 def predict(img_np, models, device):
-    avg    = np.zeros(N_CLASSES)
-    t_base = _base_tensor(img_np, device)
+    avg      = np.zeros(N_CLASSES)
+    per_arch = {}
+    t_base   = _base_tensor(img_np, device)
     with torch.inference_mode():
         for key, _, size in ARCHS:
-            t   = _resize_norm(t_base, size, device)
-            avg += torch.softmax(models[key](t), dim=1).cpu().numpy()[0]
+            t    = _resize_norm(t_base, size, device)
+            prob = torch.softmax(models[key](t), dim=1).cpu().numpy()[0]
+            per_arch[key] = prob
+            avg += prob
     avg /= len(ARCHS)
-    return CLASS_NAMES[int(np.argmax(avg))], avg
+    return CLASS_NAMES[int(np.argmax(avg))], avg, per_arch
 
 
 def _get_target(model, key):
@@ -282,6 +290,8 @@ def main():
     parser.add_argument('--lime-samples', type=int, default=50)
     parser.add_argument('--no-lime',      action='store_true')
     parser.add_argument('--no-gradcam',   action='store_true')
+    parser.add_argument('--best-per-arch', action='store_true',
+                         help='use best config per arch (config_014/050/054) instead of the single s6 TC run')
     args = parser.parse_args()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -292,16 +302,23 @@ def main():
     print('Loading control models...')
     ctrl_models = load_models(use_tc=False, device=device)
     print('Loading TC models...')
-    tc_models   = load_models(use_tc=True,  device=device)
+    tc_models   = load_models(use_tc=True,  device=device, best_per_arch=args.best_per_arch)
 
-    ctrl_label, ctrl_probs = predict(img_np, ctrl_models, device)
-    tc_label,   tc_probs   = predict(img_np, tc_models,   device)
+    ctrl_label, ctrl_probs, ctrl_per_arch = predict(img_np, ctrl_models, device)
+    tc_label,   tc_probs,   tc_per_arch   = predict(img_np, tc_models,   device)
     print(f'\nControl → {ctrl_label}')
     for cls, p in sorted(zip(CLASS_NAMES, ctrl_probs), key=lambda x: -x[1]):
         print(f'  {cls:<15} {p:.4f}', '<' if cls == ctrl_label else '')
+    for key, _, _ in ARCHS:
+        pred = CLASS_NAMES[int(np.argmax(ctrl_per_arch[key]))]
+        print(f'  [{ARCH_DISPLAY[key]}] → {pred}  ({ctrl_per_arch[key].max():.4f})')
+
     print(f'\nTC      → {tc_label}')
     for cls, p in sorted(zip(CLASS_NAMES, tc_probs), key=lambda x: -x[1]):
         print(f'  {cls:<15} {p:.4f}', '<' if cls == tc_label else '')
+    for key, _, _ in ARCHS:
+        pred = CLASS_NAMES[int(np.argmax(tc_per_arch[key]))]
+        print(f'  [{ARCH_DISPLAY[key]}] → {pred}  ({tc_per_arch[key].max():.4f})')
 
     ctrl_cams = all_gradcams(img_np, ctrl_models, device) if not args.no_gradcam else {}
     tc_cams   = all_gradcams(img_np, tc_models,   device) if not args.no_gradcam else {}
