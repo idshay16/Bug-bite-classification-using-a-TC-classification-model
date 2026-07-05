@@ -55,7 +55,7 @@ _TC_NAMES = {
 # per-arch override — best config per model (by balanced_acc), mixed across sweep runs
 _TC_PATHS = {
     'convnext':  ROOT / 'results/checkpoints/config_014/tc_bug_convnext.pt',
-    'densenet':  ROOT / 'results/checkpoints/config_050/tc_bug_densenet.pt',
+    'densenet':  ROOT / 'results/checkpoints/config_036/tc_bug_densenet.pt',
     'inception': ROOT / 'results/checkpoints/config_054/tc_bug_inception.pt',
 }
 
