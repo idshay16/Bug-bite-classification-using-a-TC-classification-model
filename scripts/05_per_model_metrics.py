@@ -13,6 +13,17 @@ Fully standalone — run directly, no dependency on run_experiments.py:
 (only shared.py / pytorch_utils.py are imported, both resolved relative to
 this file, so cwd doesn't matter)
 
+Also called once per config from run_experiments.py's run_eval_and_xai(), right
+after 03_evaluate.py / 04_xai.py, so per-model scores land incrementally as the
+sweep progresses instead of only at the very end.
+
+Incremental / resumable: on every run it loads the existing scores.json,
+skips any (checkpoint set, architecture) pair already scored, and only
+evaluates what's missing — new configs, or configs left half-done by a
+previous crash. scores.json is re-saved after each checkpoint set (not just
+once at the end), so a crash mid-run only loses the in-progress set, not
+everything.
+
 Evaluates every checkpoint found under results/checkpoints/:
   - control_seed_<N>/control_<model>.pt   (all control seeds)
   - config_NNN/tc_bug_<model>.pt          (all TC sweep configs)
@@ -39,6 +50,7 @@ from shared import (
 
 CKPT_DIR = RESULTS_DIR / 'checkpoints'
 OUT_DIR  = RESULTS_DIR / 'per_model_score'
+OUT_JSON = OUT_DIR / 'scores.json'
 
 # Mirrors miscellaneous_code/run_experiments.py's config grid ordering
 # (seed outer loop, then label_smoothing, then phase2_lr) so a config_id
@@ -55,6 +67,27 @@ def _config_meta(config_id: int) -> dict:
             'phase2_lr': PHASE2_LR_VALUES[lr_i]}
 
 
+def _entry_key(entry: dict):
+    return ('control', entry['seed']) if entry['is_control'] else ('config', entry['config_id'])
+
+
+def _load_scores() -> dict:
+    """Returns {key: entry} keyed by _entry_key, empty if no prior run."""
+    if not OUT_JSON.exists():
+        return {}
+    with open(OUT_JSON) as f:
+        entries = json.load(f)
+    return {_entry_key(e): e for e in entries}
+
+
+def _save_scores(by_key: dict):
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = OUT_JSON.with_suffix('.tmp')
+    with open(tmp, 'w') as f:
+        json.dump(list(by_key.values()), f, indent=2)
+    tmp.replace(OUT_JSON)
+
+
 def _eval_one(timm_id, img_size, bug_batch, weight_path, tag):
     _, val_loader, classes = get_pytorch_loaders(
         BUG_TRAIN, BUG_VAL, img_size=img_size, batch_size=bug_batch, augment=False)
@@ -69,24 +102,28 @@ def _eval_one(timm_id, img_size, bug_batch, weight_path, tag):
     return metrics
 
 
-def _eval_set(ckpt_dir, weight_prefix, tag_prefix):
-    models = {}
+def _fill_missing_models(entry: dict, ckpt_dir: Path, weight_prefix: str, tag_prefix: str) -> bool:
+    """Evaluates only architectures not already present in entry['models'].
+    Returns True if anything changed."""
+    changed = False
     for model_key, timm_id, img_size, _, bug_batch in MODEL_SPECS:
+        if model_key in entry['models']:
+            continue
         wpath = ckpt_dir / f'{weight_prefix}_{model_key}.pt'
         if not wpath.exists():
             print(f'  [skip] missing {wpath}')
             continue
         print(f'  evaluating {model_key} ...')
         m = _eval_one(timm_id, img_size, bug_batch, wpath, f'{tag_prefix}_{model_key}')
-        models[model_key] = m
+        entry['models'][model_key] = m
+        changed = True
         print(f'    acc={m["accuracy"]:.4f}  bal_acc={m["balanced_acc"]:.4f}  '
               f'roc_auc={m["macro_roc_auc"]:.4f}  kappa={m["kappa"]:.4f}  mcc={m["mcc"]:.4f}')
-    return models
+    return changed
 
 
 def main():
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    entries = []
+    by_key = _load_scores()
 
     control_dirs = sorted(
         (d for d in CKPT_DIR.glob('control_seed_*') if d.is_dir()),
@@ -96,30 +133,37 @@ def main():
         key=lambda d: int(d.name.split('_')[-1]))
 
     print(f'[05_per_model_metrics] {len(control_dirs)} control seed(s), '
-          f'{len(config_dirs)} config(s) found on disk\n')
+          f'{len(config_dirs)} config(s) found on disk; '
+          f'{len(by_key)} checkpoint set(s) already in scores.json\n')
 
     # ── every control seed ────────────────────────────────────────────────
     for ctrl_dir in control_dirs:
         seed = int(ctrl_dir.name.split('_')[-1])
+        key = ('control', seed)
+        entry = by_key.setdefault(key, {'is_control': True, 'seed': seed, 'models': {}})
+        if len(entry['models']) == len(MODEL_SPECS):
+            continue
         print(f'── control seed={seed} ──')
-        models = _eval_set(ctrl_dir, 'control', f'control_seed{seed}')
-        entries.append({'is_control': True, 'seed': seed, 'models': models})
+        if _fill_missing_models(entry, ctrl_dir, 'control', f'control_seed{seed}'):
+            _save_scores(by_key)
 
     # ── every TC sweep config ──────────────────────────────────────────────
     for cfg_dir in config_dirs:
         cfg_id = int(cfg_dir.name.split('_')[-1])
-        meta   = _config_meta(cfg_id)
-        print(f"\n── config_{cfg_id:03d}  seed={meta['seed']}  "
-              f"ls={meta['label_smoothing']}  phase2_lr={meta['phase2_lr']:.0e} ──")
-        models = _eval_set(cfg_dir, 'tc_bug', f'config{cfg_id:03d}')
-        entries.append({'is_control': False, 'config_id': cfg_id, **meta, 'models': models})
+        key = ('config', cfg_id)
+        entry = by_key.setdefault(
+            key, {'is_control': False, 'config_id': cfg_id, **_config_meta(cfg_id), 'models': {}})
+        if len(entry['models']) == len(MODEL_SPECS):
+            continue
+        print(f"\n── config_{cfg_id:03d}  seed={entry['seed']}  "
+              f"ls={entry['label_smoothing']}  phase2_lr={entry['phase2_lr']:.0e} ──")
+        if _fill_missing_models(entry, cfg_dir, 'tc_bug', f'config{cfg_id:03d}'):
+            _save_scores(by_key)
 
-    out_json = OUT_DIR / 'scores.json'
-    with open(out_json, 'w') as f:
-        json.dump(entries, f, indent=2)
-    print(f'\n[05_per_model_metrics] saved → {out_json}')
+    print(f'\n[05_per_model_metrics] saved → {OUT_JSON}')
 
     # ── summary: mean Δaccuracy per architecture, TC configs vs mean control ──
+    entries = list(by_key.values())
     control_acc = {}
     for entry in entries:
         if entry['is_control']:
