@@ -242,6 +242,20 @@ def run_eval_and_xai(cfg: dict):
         if result.returncode != 0:
             print(f'[runner] WARNING: {script} exited with code {result.returncode}')
 
+
+def run_per_model_metrics():
+    """Re-scan every checkpoint on disk and refresh results/per_model_score/.
+    Cheap and idempotent (pure inference, no training) — safe to call after
+    any run, whether the sweep just finished or was only partially resumed.
+    """
+    import subprocess
+    scripts = REPO_ROOT / 'scripts'
+    print('[runner] running 05_per_model_metrics.py')
+    result = subprocess.run(
+        [sys.executable, str(scripts / '05_per_model_metrics.py')], check=False)
+    if result.returncode != 0:
+        print(f'[runner] WARNING: 05_per_model_metrics.py exited with code {result.returncode}')
+
 # ── checkpoint path helpers ───────────────────────────────────────────────────
 def cyc_ckpt_path(cfg_id: int, model_key: str) -> Path:
     return CKPT_DIR / f'config_{cfg_id:03d}' / f'cyclone_{model_key}.pt'
@@ -442,6 +456,7 @@ def cmd_run(device: torch.device):
 
     if not pending:
         print('[runner] All configs already completed.')
+        run_per_model_metrics()
         cmd_status()
         return
 
@@ -499,6 +514,7 @@ def cmd_run(device: torch.device):
             break
 
     print()
+    run_per_model_metrics()
     cmd_status()
 
 
